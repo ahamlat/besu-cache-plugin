@@ -96,7 +96,7 @@
 <div class="section-title">Recent Blocks</div>
 <table class="recent-table" id="recentTable">
   <thead>
-    <tr><th>Block</th><th>Total</th><th>EVM</th><th>Root</th><th>MGas/s</th><th>Txs</th><th>Gas</th><th>SLOADs</th>
+    <tr><th>Block</th><th>Total</th><th>EVM</th><th>Root</th><th>MGas/s</th><th>Txs</th><th>Gas</th><th>SLOADs</th><th>SSTOREs</th>
         <th>Read</th><th>NotFnd</th><th>Cached</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
@@ -208,8 +208,9 @@ function renderBlockInfo(d) {
   }
 
   html += `
-    <div class="bi"><div class="lbl">Total SLOADs</div><div class="val">${fmt(d.totalSloads)}</div>
+    <div class="bi"><div class="lbl">SLOADs</div><div class="val">${fmt(d.totalSloads)}</div>
       <div class="sub">${uniqueSlots} unique slots</div></div>
+    <div class="bi"><div class="lbl">SSTOREs</div><div class="val">${fmt(d.totalSstores)}</div></div>
     <div class="bi"><div class="lbl">Storage Read</div><div class="val" style="color:var(--read)">${fmt(d.storageReads)}</div>
       <div class="sub">1st read, value found</div></div>
     <div class="bi"><div class="lbl">Not Found</div><div class="val" style="color:var(--nf)">${fmt(d.notFound)}</div>
@@ -355,6 +356,7 @@ async function loadRecent() {
         <td>${b.txCount}</td>
         <td>${fmtGas(b.gasUsed)} <span style="color:var(--muted);font-size:10px">(${b.gasUsedPercent}%)</span></td>
         <td>${b.totalSloads}</td>
+        <td>${b.totalSstores}</td>
         <td style="color:var(--read)">${b.storageReads}</td>
         <td style="color:var(--nf)">${b.notFound}</td>
         <td style="color:var(--cached)">${b.cached}</td>

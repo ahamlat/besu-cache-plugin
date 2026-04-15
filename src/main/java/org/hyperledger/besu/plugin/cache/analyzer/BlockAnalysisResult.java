@@ -19,6 +19,7 @@ public record BlockAnalysisResult(
     int transactionCount,
     List<SloadRecord> sloads,
     int totalSloads,
+    int totalSstores,
     int coldSloads,
     int warmSloads,
     List<AccountStats> accountStats,
@@ -39,7 +40,7 @@ public record BlockAnalysisResult(
   public BlockAnalysisResult withMetadata(final BlockMetadata newMetadata) {
     return new BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
-        sloads, totalSloads, coldSloads, warmSloads, accountStats,
+        sloads, totalSloads, totalSstores, coldSloads, warmSloads, accountStats,
         storageReads, notFound, cached,
         blockDataCacheHit, blockDataCacheMiss, blockMemtableHit,
         rocksdbStatsAvailable, newMetadata);
@@ -51,6 +52,7 @@ public record BlockAnalysisResult(
       final long timestamp,
       final int transactionCount,
       final List<SloadRecord> sloads,
+      final int totalSstores,
       final java.util.function.Function<String, String> nameResolver,
       final boolean rocksdbStatsAvailable,
       final RocksDBStatsProvider.Snapshot blockDelta,
@@ -86,7 +88,7 @@ public record BlockAnalysisResult(
 
     return new BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
-        List.copyOf(sloads), sloads.size(), cold, warm,
+        List.copyOf(sloads), sloads.size(), totalSstores, cold, warm,
         List.copyOf(stats),
         totalStorageRead, totalNotFound, totalCached,
         blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit(),

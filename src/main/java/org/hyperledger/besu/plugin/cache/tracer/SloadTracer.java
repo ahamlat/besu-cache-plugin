@@ -43,6 +43,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   private static final Logger LOG = LoggerFactory.getLogger(SloadTracer.class);
   private static final int SLOAD_OPCODE = 0x54;
+  private static final int SSTORE_OPCODE = 0x55;
 
   private final BlockResultStore store;
   private final ContractNameResolver nameResolver;
@@ -59,6 +60,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   private Address pendingAddress;
   private UInt256 pendingSlot;
+  private int sstoreCount;
 
   private RocksDBStatsProvider.Snapshot blockStartSnapshot;
   private long blockStartNanos;
@@ -108,6 +110,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
     txIndex = -1;
     pendingAddress = null;
     pendingSlot = null;
+    sstoreCount = 0;
     currentBlockNumber = blockNum;
     currentBlockHash = blockHash;
     currentBlockTimestamp = timestamp;
@@ -126,10 +129,13 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   @Override
   public void tracePreExecution(final MessageFrame frame) {
-    if (frame.getCurrentOperation().getOpcode() == SLOAD_OPCODE) {
+    int opcode = frame.getCurrentOperation().getOpcode();
+    if (opcode == SLOAD_OPCODE) {
       pendingAddress = frame.getRecipientAddress();
       Bytes raw = frame.getStackItem(0);
       pendingSlot = UInt256.fromBytes(raw);
+    } else if (opcode == SSTORE_OPCODE) {
+      sstoreCount++;
     }
   }
 
@@ -190,6 +196,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
         currentBlockTimestamp,
         currentTxCount,
         sloads,
+        sstoreCount,
         addr -> nameResolver.getName(addr),
         statsProvider.isAvailable(),
         blockDelta,
@@ -199,9 +206,9 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
     pendingTimings.put(currentBlockNumber, new long[]{blockStartNanos, blockEndNanos});
 
-    LOG.info("Block {} EVM done in {}ms: {} SLOADs ({} read, {} notfound, {} cached) "
+    LOG.info("Block {} EVM done in {}ms: {} SLOADs {} SSTOREs ({} read, {} notfound, {} cached) "
             + "gas {}/{} across {} contracts",
-        currentBlockNumber, evmExecutionMs, result.totalSloads(),
+        currentBlockNumber, evmExecutionMs, result.totalSloads(), sstoreCount,
         result.storageReads(), result.notFound(), result.cached(),
         gasUsed, currentGasLimit, result.accountStats().size());
   }

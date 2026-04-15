@@ -170,6 +170,7 @@ public class WebUiServer {
     entry.put("blockNumber", r.blockNumber());
     entry.put("txCount", r.transactionCount());
     entry.put("totalSloads", r.totalSloads());
+    entry.put("totalSstores", r.totalSstores());
     entry.put("storageReads", r.storageReads());
     entry.put("notFound", r.notFound());
     entry.put("cached", r.cached());
@@ -193,6 +194,7 @@ public class WebUiServer {
     response.put("timestamp", r.timestamp());
     response.put("transactionCount", r.transactionCount());
     response.put("totalSloads", r.totalSloads());
+    response.put("totalSstores", r.totalSstores());
     response.put("storageReads", r.storageReads());
     response.put("notFound", r.notFound());
     response.put("cached", r.cached());
