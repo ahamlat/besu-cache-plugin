@@ -4,6 +4,7 @@ import org.hyperledger.besu.plugin.cache.analyzer.AccountStats;
 import org.hyperledger.besu.plugin.cache.analyzer.BlockAnalysisResult;
 import org.hyperledger.besu.plugin.cache.analyzer.SloadRecord;
 import org.hyperledger.besu.plugin.cache.naming.ContractNameResolver;
+import org.hyperledger.besu.plugin.cache.rocksdb.RocksDBStatsProvider;
 import org.hyperledger.besu.plugin.cache.store.BlockResultStore;
 
 import java.io.InputStream;
@@ -30,6 +31,7 @@ public class WebUiServer {
 
   private final BlockResultStore store;
   private final ContractNameResolver nameResolver;
+  private final RocksDBStatsProvider statsProvider;
   private final int port;
 
   private Vertx vertx;
@@ -38,9 +40,11 @@ public class WebUiServer {
   public WebUiServer(
       final BlockResultStore store,
       final ContractNameResolver nameResolver,
+      final RocksDBStatsProvider statsProvider,
       final int port) {
     this.store = store;
     this.nameResolver = nameResolver;
+    this.statsProvider = statsProvider;
     this.port = port;
   }
 
@@ -123,6 +127,7 @@ public class WebUiServer {
       entry.put("contractName", nameResolver.getName(addr));
       entry.put("slot", r.slotKey().toHexString());
       entry.put("cold", r.isCold());
+      entry.put("storageType", r.storageType());
       entry.put("txIndex", r.transactionIndex());
       sloads.add(entry);
     }
@@ -146,8 +151,14 @@ public class WebUiServer {
       entry.put("coldSloads", r.coldSloads());
       entry.put("warmSloads", r.warmSloads());
       entry.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
+      entry.put("cacheHits", r.cacheHits());
+      entry.put("cacheMisses", r.cacheMisses());
+      entry.put("memtableHits", r.memtableHits());
+      entry.put("accumulatorHits", r.accumulatorHits());
+      entry.put("cacheHitPercent", Math.round(r.cacheHitPercent() * 10.0) / 10.0);
       entry.put("contracts", r.accountStats().size());
       entry.put("txCount", r.transactionCount());
+      entry.put("rocksdbStats", r.rocksdbStatsAvailable());
       blocks.add(entry);
     }
     jsonResponse(ctx, 200, blocks);
@@ -158,6 +169,8 @@ public class WebUiServer {
     status.put("blocksStored", store.size());
     status.put("contractNamesCached", nameResolver.cacheSize());
     status.put("pendingNameResolutions", nameResolver.pendingSize());
+    status.put("etherscanActive", nameResolver.isActive());
+    status.put("rocksdbStatsAvailable", statsProvider.isAvailable());
     store.getLatest().ifPresent(latest -> {
       status.put("latestBlock", latest.blockNumber());
       status.put("latestTotalSloads", latest.totalSloads());
@@ -175,6 +188,12 @@ public class WebUiServer {
     response.put("coldSloads", r.coldSloads());
     response.put("warmSloads", r.warmSloads());
     response.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
+    response.put("cacheHits", r.cacheHits());
+    response.put("cacheMisses", r.cacheMisses());
+    response.put("memtableHits", r.memtableHits());
+    response.put("accumulatorHits", r.accumulatorHits());
+    response.put("cacheHitPercent", Math.round(r.cacheHitPercent() * 10.0) / 10.0);
+    response.put("rocksdbStats", r.rocksdbStatsAvailable());
 
     List<Map<String, Object>> accounts = new ArrayList<>();
     for (AccountStats a : r.accountStats()) {
@@ -186,6 +205,12 @@ public class WebUiServer {
       acc.put("warm", a.warmReads());
       acc.put("coldPercent", Math.round(a.coldPercent() * 10.0) / 10.0);
       acc.put("warmPercent", Math.round(a.warmPercent() * 10.0) / 10.0);
+      acc.put("cacheHits", a.cacheHits());
+      acc.put("cacheMisses", a.cacheMisses());
+      acc.put("memtableHits", a.memtableHits());
+      acc.put("accumulatorHits", a.accumulatorHits());
+      acc.put("cacheHitPercent", Math.round(a.cacheHitPercent() * 10.0) / 10.0);
+      acc.put("cacheMissPercent", Math.round(a.cacheMissPercent() * 10.0) / 10.0);
       accounts.add(acc);
     }
     response.put("accounts", accounts);

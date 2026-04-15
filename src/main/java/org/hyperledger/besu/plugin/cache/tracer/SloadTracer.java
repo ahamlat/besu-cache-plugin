@@ -3,6 +3,7 @@ package org.hyperledger.besu.plugin.cache.tracer;
 import org.hyperledger.besu.plugin.cache.analyzer.BlockAnalysisResult;
 import org.hyperledger.besu.plugin.cache.analyzer.SloadRecord;
 import org.hyperledger.besu.plugin.cache.naming.ContractNameResolver;
+import org.hyperledger.besu.plugin.cache.rocksdb.RocksDBStatsProvider;
 import org.hyperledger.besu.plugin.cache.store.BlockResultStore;
 
 import org.hyperledger.besu.datatypes.Address;
@@ -24,8 +25,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Captures every SLOAD during block execution and classifies as warm/cold
- * based on the gas cost returned by SLoadOperation.
+ * Captures every SLOAD during block execution and classifies each as:
+ * <ul>
+ *   <li>EVM-level: warm/cold (based on gas cost, EIP-2929)</li>
+ *   <li>RocksDB-level: HIT/MISS/MEMTABLE/ACCUMULATOR (based on ticker deltas)</li>
+ * </ul>
  */
 public class SloadTracer implements BlockAwareOperationTracer {
 
@@ -34,6 +38,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   private final BlockResultStore store;
   private final ContractNameResolver nameResolver;
+  private final RocksDBStatsProvider statsProvider;
 
   private long currentBlockNumber;
   private String currentBlockHash;
@@ -42,13 +47,17 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private int txIndex = -1;
   private final List<SloadRecord> sloads = new ArrayList<>();
 
-  // Per-SLOAD tracking: address captured in pre, cold classification in post
   private Address pendingAddress;
   private UInt256 pendingSlot;
+  private RocksDBStatsProvider.Snapshot preSnapshot;
 
-  public SloadTracer(final BlockResultStore store, final ContractNameResolver nameResolver) {
+  public SloadTracer(
+      final BlockResultStore store,
+      final ContractNameResolver nameResolver,
+      final RocksDBStatsProvider statsProvider) {
     this.store = store;
     this.nameResolver = nameResolver;
+    this.statsProvider = statsProvider;
   }
 
   @Override
@@ -74,6 +83,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
     txIndex = -1;
     pendingAddress = null;
     pendingSlot = null;
+    preSnapshot = null;
     currentBlockNumber = blockNum;
     currentBlockHash = blockHash;
     currentBlockTimestamp = timestamp;
@@ -92,6 +102,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
       pendingAddress = frame.getRecipientAddress();
       Bytes raw = frame.getStackItem(0);
       pendingSlot = UInt256.fromBytes(raw);
+      preSnapshot = statsProvider.snapshot();
     }
   }
 
@@ -99,14 +110,23 @@ public class SloadTracer implements BlockAwareOperationTracer {
   public void tracePostExecution(final MessageFrame frame, final OperationResult operationResult) {
     if (pendingAddress != null) {
       long gasCost = operationResult.getGasCost();
-      // Cold SLOAD costs 2100 gas, warm costs 100 gas (post EIP-2929)
       boolean isCold = gasCost > 200;
-      sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex));
 
+      String storageType;
+      if (statsProvider.isAvailable() && preSnapshot != null) {
+        RocksDBStatsProvider.Snapshot postSnapshot = statsProvider.snapshot();
+        RocksDBStatsProvider.Snapshot delta = postSnapshot.delta(preSnapshot);
+        storageType = delta.classify();
+      } else {
+        storageType = isCold ? "MISS" : "HIT";
+      }
+
+      sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType));
       nameResolver.enqueue(pendingAddress);
 
       pendingAddress = null;
       pendingSlot = null;
+      preSnapshot = null;
     }
   }
 
@@ -121,11 +141,14 @@ public class SloadTracer implements BlockAwareOperationTracer {
         currentBlockTimestamp,
         currentTxCount,
         sloads,
-        addr -> nameResolver.getName(addr));
+        addr -> nameResolver.getName(addr),
+        statsProvider.isAvailable());
 
     store.store(result);
-    LOG.info("Block {} analyzed: {} SLOADs ({} cold, {} warm) across {} contracts",
+    LOG.info("Block {} analyzed: {} SLOADs ({} cold, {} warm | {} HIT, {} MISS, {} MEM, {} ACC) "
+            + "across {} contracts",
         currentBlockNumber, result.totalSloads(), result.coldSloads(), result.warmSloads(),
+        result.cacheHits(), result.cacheMisses(), result.memtableHits(), result.accumulatorHits(),
         result.accountStats().size());
   }
 }

@@ -1,6 +1,7 @@
 package org.hyperledger.besu.plugin.cache;
 
 import org.hyperledger.besu.plugin.cache.naming.ContractNameResolver;
+import org.hyperledger.besu.plugin.cache.rocksdb.RocksDBStatsProvider;
 import org.hyperledger.besu.plugin.cache.rpc.CacheAnalysisRpcMethods;
 import org.hyperledger.besu.plugin.cache.store.BlockResultStore;
 import org.hyperledger.besu.plugin.cache.tracer.SloadTracerProvider;
@@ -17,14 +18,14 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Besu plugin that captures SLOAD operations during block import,
- * classifies them as warm/cold, resolves contract names, and
- * exposes results via JSON-RPC and an embedded web dashboard.
+ * classifies them as warm/cold (EVM) and HIT/MISS/MEMTABLE/ACCUMULATOR (RocksDB),
+ * resolves contract names, and exposes results via JSON-RPC and a web dashboard.
  *
- * <p>Configuration via environment variables:
+ * <p>Configuration via environment variables or system properties:
  * <ul>
- *   <li>CACHE_PLUGIN_ETHERSCAN_KEY - Etherscan API key for contract name resolution</li>
- *   <li>CACHE_PLUGIN_WEB_PORT - Web UI port (default: 8547)</li>
- *   <li>CACHE_PLUGIN_MAX_BLOCKS - Max blocks to keep in memory (default: 1000)</li>
+ *   <li>CACHE_PLUGIN_ETHERSCAN_KEY / cache.plugin.etherscan.key</li>
+ *   <li>CACHE_PLUGIN_WEB_PORT / cache.plugin.web.port (default: 8548)</li>
+ *   <li>CACHE_PLUGIN_MAX_BLOCKS / cache.plugin.max.blocks (default: 1000)</li>
  * </ul>
  */
 @AutoService(BesuPlugin.class)
@@ -38,6 +39,7 @@ public class CacheAnalysisPlugin implements BesuPlugin {
   private ServiceManager serviceManager;
   private BlockResultStore store;
   private ContractNameResolver nameResolver;
+  private RocksDBStatsProvider statsProvider;
   private WebUiServer webServer;
 
   @Override
@@ -45,20 +47,21 @@ public class CacheAnalysisPlugin implements BesuPlugin {
     LOG.info("Registering Cache Analysis Plugin");
     this.serviceManager = serviceManager;
 
-    int maxBlocks = getEnvInt("CACHE_PLUGIN_MAX_BLOCKS", DEFAULT_MAX_BLOCKS);
+    int maxBlocks = getConfigInt("CACHE_PLUGIN_MAX_BLOCKS", "cache.plugin.max.blocks",
+        DEFAULT_MAX_BLOCKS);
     this.store = new BlockResultStore(maxBlocks);
     this.nameResolver = new ContractNameResolver();
+    this.statsProvider = new RocksDBStatsProvider();
 
-    // Register the block import tracer so AbstractBlockProcessor uses our SloadTracer
-    SloadTracerProvider tracerProvider = new SloadTracerProvider(store, nameResolver);
+    SloadTracerProvider tracerProvider = new SloadTracerProvider(store, nameResolver, statsProvider);
     serviceManager.addService(BlockImportTracerProvider.class, tracerProvider);
     LOG.info("Registered BlockImportTracerProvider for SLOAD tracing");
 
-    // Register JSON-RPC endpoints (must happen during register phase)
     serviceManager.getService(RpcEndpointService.class)
         .ifPresentOrElse(
             rpcService -> {
-              CacheAnalysisRpcMethods rpcMethods = new CacheAnalysisRpcMethods(store, nameResolver);
+              CacheAnalysisRpcMethods rpcMethods =
+                  new CacheAnalysisRpcMethods(store, nameResolver, statsProvider);
               rpcMethods.register(rpcService);
             },
             () -> LOG.warn("RpcEndpointService not available, cache_* RPC methods not registered"));
@@ -68,17 +71,25 @@ public class CacheAnalysisPlugin implements BesuPlugin {
   public void start() {
     LOG.info("Starting Cache Analysis Plugin");
 
-    // Start contract name resolver with Etherscan API key
-    String apiKey = System.getenv("CACHE_PLUGIN_ETHERSCAN_KEY");
+    String apiKey = getConfigString("CACHE_PLUGIN_ETHERSCAN_KEY", "cache.plugin.etherscan.key");
     nameResolver.start(apiKey);
 
-    // Start embedded web UI
-    int webPort = getEnvInt("CACHE_PLUGIN_WEB_PORT", DEFAULT_WEB_PORT);
-    webServer = new WebUiServer(store, nameResolver, webPort);
+    boolean statsOk = statsProvider.init(serviceManager);
+    if (!statsOk) {
+      LOG.warn("RocksDB stats not available - will fall back to EVM warm/cold heuristic. "
+          + "Stats may become available after the first block is imported.");
+    }
+
+    int webPort = getConfigInt("CACHE_PLUGIN_WEB_PORT", "cache.plugin.web.port", DEFAULT_WEB_PORT);
+    webServer = new WebUiServer(store, nameResolver, statsProvider, webPort);
     webServer.start();
 
-    LOG.info("Cache Analysis Plugin started (web UI port: {}, max blocks: {})",
-        webPort, getEnvInt("CACHE_PLUGIN_MAX_BLOCKS", DEFAULT_MAX_BLOCKS));
+    LOG.info("Cache Analysis Plugin started (web UI port: {}, max blocks: {}, "
+            + "rocksdb stats: {}, etherscan: {})",
+        webPort,
+        getConfigInt("CACHE_PLUGIN_MAX_BLOCKS", "cache.plugin.max.blocks", DEFAULT_MAX_BLOCKS),
+        statsOk ? "active" : "unavailable",
+        nameResolver.isActive() ? "active" : "inactive");
   }
 
   @Override
@@ -88,11 +99,27 @@ public class CacheAnalysisPlugin implements BesuPlugin {
     if (nameResolver != null) nameResolver.stop();
   }
 
-  private static int getEnvInt(final String name, final int defaultValue) {
-    String val = System.getenv(name);
-    if (val == null || val.isBlank()) return defaultValue;
+  /** Lazy init for RocksDB stats (called from tracer on first block if not already initialized). */
+  public void retryStatsInit() {
+    if (!statsProvider.isAvailable()) {
+      statsProvider.init(serviceManager);
+    }
+  }
+
+  private static String getConfigString(final String envName, final String propName) {
+    String val = System.getenv(envName);
+    if (val != null && !val.isBlank()) return val;
+    val = System.getProperty(propName);
+    if (val != null && !val.isBlank()) return val;
+    return null;
+  }
+
+  private static int getConfigInt(final String envName, final String propName,
+      final int defaultValue) {
+    String val = getConfigString(envName, propName);
+    if (val == null) return defaultValue;
     try {
-      return Integer.parseInt(val);
+      return Integer.parseInt(val.trim());
     } catch (NumberFormatException e) {
       return defaultValue;
     }

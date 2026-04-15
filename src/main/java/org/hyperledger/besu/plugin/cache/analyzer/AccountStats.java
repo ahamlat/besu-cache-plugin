@@ -6,7 +6,11 @@ public record AccountStats(
     String contractName,
     int totalReads,
     int coldReads,
-    int warmReads) {
+    int warmReads,
+    int cacheHits,
+    int cacheMisses,
+    int memtableHits,
+    int accumulatorHits) {
 
   public double coldPercent() {
     return totalReads > 0 ? coldReads * 100.0 / totalReads : 0;
@@ -14,5 +18,13 @@ public record AccountStats(
 
   public double warmPercent() {
     return totalReads > 0 ? warmReads * 100.0 / totalReads : 0;
+  }
+
+  public double cacheHitPercent() {
+    return totalReads > 0 ? cacheHits * 100.0 / totalReads : 0;
+  }
+
+  public double cacheMissPercent() {
+    return totalReads > 0 ? cacheMisses * 100.0 / totalReads : 0;
   }
 }

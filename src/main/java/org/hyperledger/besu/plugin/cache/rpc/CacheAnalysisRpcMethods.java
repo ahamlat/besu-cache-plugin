@@ -4,6 +4,7 @@ import org.hyperledger.besu.plugin.cache.analyzer.AccountStats;
 import org.hyperledger.besu.plugin.cache.analyzer.BlockAnalysisResult;
 import org.hyperledger.besu.plugin.cache.analyzer.SloadRecord;
 import org.hyperledger.besu.plugin.cache.naming.ContractNameResolver;
+import org.hyperledger.besu.plugin.cache.rocksdb.RocksDBStatsProvider;
 import org.hyperledger.besu.plugin.cache.store.BlockResultStore;
 import org.hyperledger.besu.plugin.services.RpcEndpointService;
 import org.hyperledger.besu.plugin.services.rpc.PluginRpcRequest;
@@ -25,11 +26,15 @@ public class CacheAnalysisRpcMethods {
 
   private final BlockResultStore store;
   private final ContractNameResolver nameResolver;
+  private final RocksDBStatsProvider statsProvider;
 
   public CacheAnalysisRpcMethods(
-      final BlockResultStore store, final ContractNameResolver nameResolver) {
+      final BlockResultStore store,
+      final ContractNameResolver nameResolver,
+      final RocksDBStatsProvider statsProvider) {
     this.store = store;
     this.nameResolver = nameResolver;
+    this.statsProvider = statsProvider;
   }
 
   public void register(final RpcEndpointService rpcService) {
@@ -41,7 +46,6 @@ public class CacheAnalysisRpcMethods {
     LOG.info("Registered cache_* RPC endpoints");
   }
 
-  /** cache_getBlockAnalysis(blockNumber) -> per-account breakdown */
   private Map<String, Object> getBlockAnalysis(final PluginRpcRequest request) {
     Object[] params = request.getParams();
     long blockNumber = parseBlockNumber(params);
@@ -53,7 +57,6 @@ public class CacheAnalysisRpcMethods {
     return serializeBlockAnalysis(opt.get());
   }
 
-  /** cache_getBlockSloads(blockNumber, [filterAddress]) -> per-SLOAD detail */
   private Map<String, Object> getBlockSloads(final PluginRpcRequest request) {
     Object[] params = request.getParams();
     long blockNumber = parseBlockNumber(params);
@@ -75,6 +78,7 @@ public class CacheAnalysisRpcMethods {
       entry.put("contractName", nameResolver.getName(addr));
       entry.put("slot", r.slotKey().toHexString());
       entry.put("cold", r.isCold());
+      entry.put("storageType", r.storageType());
       entry.put("txIndex", r.transactionIndex());
       sloads.add(entry);
     }
@@ -86,7 +90,6 @@ public class CacheAnalysisRpcMethods {
     return response;
   }
 
-  /** cache_getRecentBlocks(count) -> summary of last N blocks */
   private List<Map<String, Object>> getRecentBlocks(final PluginRpcRequest request) {
     Object[] params = request.getParams();
     int count = params.length > 0 ? Integer.parseInt(params[0].toString()) : 10;
@@ -100,6 +103,10 @@ public class CacheAnalysisRpcMethods {
       entry.put("coldSloads", r.coldSloads());
       entry.put("warmSloads", r.warmSloads());
       entry.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
+      entry.put("cacheHits", r.cacheHits());
+      entry.put("cacheMisses", r.cacheMisses());
+      entry.put("memtableHits", r.memtableHits());
+      entry.put("accumulatorHits", r.accumulatorHits());
       entry.put("contracts", r.accountStats().size());
       entry.put("txCount", r.transactionCount());
       blocks.add(entry);
@@ -107,7 +114,6 @@ public class CacheAnalysisRpcMethods {
     return blocks;
   }
 
-  /** cache_getContractName(address) */
   private Map<String, Object> getContractName(final PluginRpcRequest request) {
     Object[] params = request.getParams();
     if (params.length == 0) return Map.of("error", "address required");
@@ -115,12 +121,13 @@ public class CacheAnalysisRpcMethods {
     return Map.of("address", addr, "name", nameResolver.getName(addr));
   }
 
-  /** cache_getStatus() -> plugin status */
   private Map<String, Object> getStatus(final PluginRpcRequest request) {
     Map<String, Object> status = new LinkedHashMap<>();
     status.put("blocksStored", store.size());
     status.put("contractNamesCached", nameResolver.cacheSize());
     status.put("pendingNameResolutions", nameResolver.pendingSize());
+    status.put("etherscanActive", nameResolver.isActive());
+    status.put("rocksdbStatsAvailable", statsProvider.isAvailable());
     store.getLatest().ifPresent(latest -> {
       status.put("latestBlock", latest.blockNumber());
       status.put("latestTotalSloads", latest.totalSloads());
@@ -138,6 +145,12 @@ public class CacheAnalysisRpcMethods {
     response.put("coldSloads", r.coldSloads());
     response.put("warmSloads", r.warmSloads());
     response.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
+    response.put("cacheHits", r.cacheHits());
+    response.put("cacheMisses", r.cacheMisses());
+    response.put("memtableHits", r.memtableHits());
+    response.put("accumulatorHits", r.accumulatorHits());
+    response.put("cacheHitPercent", Math.round(r.cacheHitPercent() * 10.0) / 10.0);
+    response.put("rocksdbStats", r.rocksdbStatsAvailable());
 
     List<Map<String, Object>> accounts = new ArrayList<>();
     for (AccountStats a : r.accountStats()) {
@@ -149,6 +162,12 @@ public class CacheAnalysisRpcMethods {
       acc.put("warm", a.warmReads());
       acc.put("coldPercent", Math.round(a.coldPercent() * 10.0) / 10.0);
       acc.put("warmPercent", Math.round(a.warmPercent() * 10.0) / 10.0);
+      acc.put("cacheHits", a.cacheHits());
+      acc.put("cacheMisses", a.cacheMisses());
+      acc.put("memtableHits", a.memtableHits());
+      acc.put("accumulatorHits", a.accumulatorHits());
+      acc.put("cacheHitPercent", Math.round(a.cacheHitPercent() * 10.0) / 10.0);
+      acc.put("cacheMissPercent", Math.round(a.cacheMissPercent() * 10.0) / 10.0);
       accounts.add(acc);
     }
     response.put("accounts", accounts);
