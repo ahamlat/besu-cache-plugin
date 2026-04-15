@@ -7,7 +7,7 @@
 <style>
   :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3;
           --muted: #8b949e; --accent: #58a6ff; --cold: #f85149; --warm: #3fb950;
-          --hit: #3fb950; --miss: #f85149; --mem: #d29922; --acc: #8b949e; }
+          --hit: #3fb950; --miss: #f85149; --mem: #d29922; --nf: #f0883e; --acc: #8b949e; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
          background: var(--bg); color: var(--text); padding: 20px; }
@@ -24,17 +24,12 @@
                padding: 10px 16px; min-width: 120px; }
   .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
   .stat-card .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
-  .stat-card .value.cold { color: var(--cold); }
-  .stat-card .value.warm { color: var(--warm); }
-  .stat-card .value.hit { color: var(--hit); }
-  .stat-card .value.miss { color: var(--miss); }
-  .stat-card .value.mem { color: var(--mem); }
-  .stat-card .value.acc { color: var(--acc); }
   table { width: 100%; border-collapse: collapse; background: var(--surface);
           border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 12px; }
   th { background: #1c2128; cursor: pointer; user-select: none; white-space: nowrap; }
   th:hover { color: var(--accent); }
+  th.sorted { color: var(--accent); }
   tr:hover td { background: rgba(88,166,255,0.05); }
   .addr { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 11px; }
   .name { color: var(--accent); font-weight: 500; }
@@ -52,6 +47,7 @@
   .badge.hit { background: rgba(63,185,80,0.2); color: var(--hit); }
   .badge.miss { background: rgba(248,81,73,0.2); color: var(--miss); }
   .badge.mem { background: rgba(210,153,34,0.2); color: var(--mem); }
+  .badge.nf { background: rgba(240,136,62,0.2); color: var(--nf); }
   .badge.acc { background: rgba(139,148,158,0.2); color: var(--acc); }
   .badge.cold { background: rgba(248,81,73,0.2); color: var(--cold); }
   .badge.warm { background: rgba(63,185,80,0.2); color: var(--warm); }
@@ -64,14 +60,19 @@
   <input id="blockInput" type="text" placeholder="Block number or 'latest'" value="latest">
   <button onclick="loadBlock()">Load</button>
   <button id="autoBtn" onclick="toggleAuto()">Auto-refresh: OFF</button>
-  <select id="sortSelect" onchange="renderAccountTable()">
+  <select id="sortSelect" onchange="sortCol=this.value;renderAccountTable()">
     <option value="total">Sort by: Total</option>
+    <option value="notFound">Sort by: Not Found</option>
     <option value="cacheMisses">Sort by: Misses</option>
     <option value="cacheHits">Sort by: Hits</option>
     <option value="memtableHits">Sort by: Memtable</option>
     <option value="accumulatorHits">Sort by: Accumulator</option>
+    <option value="notFoundPercent">Sort by: Not Found %</option>
+    <option value="cacheMissPercent">Sort by: Miss %</option>
+    <option value="cacheHitPercent">Sort by: Hit %</option>
     <option value="cold">Sort by: Cold</option>
     <option value="warm">Sort by: Warm</option>
+    <option value="coldPercent">Sort by: Cold %</option>
     <option value="contractName">Sort by: Name</option>
   </select>
   <span id="status"></span>
@@ -91,7 +92,7 @@
 <table class="recent-table" id="recentTable">
   <thead>
     <tr><th>Block</th><th>Txs</th><th>SLOADs</th>
-        <th>HIT</th><th>MISS</th><th>MEM</th><th>ACC</th>
+        <th>HIT</th><th>MISS</th><th>NOTFND</th><th>MEM</th><th>ACC</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
   <tbody id="recentBody"></tbody>
@@ -101,6 +102,7 @@
 let currentData = null;
 let autoRefresh = false;
 let autoTimer = null;
+let sortCol = 'total';
 
 async function fetchJson(url) {
   const r = await fetch(url);
@@ -130,55 +132,66 @@ function renderSummary(d) {
 
   if (hasRocksdb) {
     cards += `
-    <div class="stat-card"><div class="label">Cache HIT</div><div class="value hit">${d.cacheHits}</div></div>
-    <div class="stat-card"><div class="label">Cache MISS</div><div class="value miss">${d.cacheMisses}</div></div>
-    <div class="stat-card"><div class="label">Memtable</div><div class="value mem">${d.memtableHits}</div></div>
-    <div class="stat-card"><div class="label">Accumulator</div><div class="value acc">${d.accumulatorHits}</div></div>
-    <div class="stat-card"><div class="label">Hit Ratio</div><div class="value hit">${d.cacheHitPercent}%</div></div>`;
+    <div class="stat-card"><div class="label">Cache HIT</div><div class="value" style="color:var(--hit)">${d.cacheHits}</div></div>
+    <div class="stat-card"><div class="label">Cache MISS</div><div class="value" style="color:var(--miss)">${d.cacheMisses}</div></div>
+    <div class="stat-card"><div class="label">NOT FOUND</div><div class="value" style="color:var(--nf)">${d.notFound}</div></div>
+    <div class="stat-card"><div class="label">Memtable</div><div class="value" style="color:var(--mem)">${d.memtableHits}</div></div>
+    <div class="stat-card"><div class="label">Accumulator</div><div class="value" style="color:var(--acc)">${d.accumulatorHits}</div></div>
+    <div class="stat-card"><div class="label">Hit Ratio</div><div class="value" style="color:var(--hit)">${d.cacheHitPercent}%</div></div>`;
   }
 
   cards += `
-    <div class="stat-card"><div class="label">Cold (EVM)</div><div class="value cold">${d.coldSloads}</div></div>
-    <div class="stat-card"><div class="label">Warm (EVM)</div><div class="value warm">${d.warmSloads}</div></div>
+    <div class="stat-card"><div class="label">Cold (EVM)</div><div class="value" style="color:var(--cold)">${d.coldSloads}</div></div>
+    <div class="stat-card"><div class="label">Warm (EVM)</div><div class="value" style="color:var(--warm)">${d.warmSloads}</div></div>
     <div class="stat-card"><div class="label">Contracts</div><div class="value">${d.accounts.length}</div></div>`;
 
   document.getElementById('summaryCards').innerHTML = cards;
 }
 
+function colDefs(hasRocksdb) {
+  const cols = [
+    {key:'address', label:'Contract', type:'string'},
+    {key:'contractName', label:'Name', type:'string'},
+    {key:'total', label:'Total', type:'number'},
+  ];
+  if (hasRocksdb) {
+    cols.push({key:'cacheHits', label:'HIT', type:'number', color:'var(--hit)'});
+    cols.push({key:'cacheMisses', label:'MISS', type:'number', color:'var(--miss)'});
+    cols.push({key:'notFound', label:'NOTFND', type:'number', color:'var(--nf)'});
+    cols.push({key:'memtableHits', label:'MEM', type:'number', color:'var(--mem)'});
+    cols.push({key:'accumulatorHits', label:'ACC', type:'number', color:'var(--acc)'});
+    cols.push({key:'cacheHitPercent', label:'Hit %', type:'number'});
+    cols.push({key:'cacheMissPercent', label:'Miss %', type:'number'});
+    cols.push({key:'notFoundPercent', label:'NF %', type:'number'});
+  }
+  cols.push({key:'cold', label:'Cold', type:'number', color:'var(--cold)'});
+  cols.push({key:'warm', label:'Warm', type:'number', color:'var(--warm)'});
+  cols.push({key:'coldPercent', label:'Cold %', type:'number'});
+  cols.push({key:'bar', label:'', type:'bar'});
+  return cols;
+}
+
 function renderAccountTable() {
   if (!currentData) return;
-  const sortCol = document.getElementById('sortSelect').value;
   const hasRocksdb = currentData.rocksdbStats;
+  const cols = colDefs(hasRocksdb);
 
   let accounts = [...currentData.accounts];
   accounts.sort((a,b) => {
+    if (sortCol === 'bar') return 0;
     let va = a[sortCol], vb = b[sortCol];
-    if (typeof va === 'string') return (va||'').localeCompare(vb||'');
+    if (typeof va === 'string' || typeof vb === 'string') {
+      return (va||'').localeCompare(vb||'');
+    }
     return (vb||0) - (va||0);
   });
 
-  const cols = [
-    {key:'address', label:'Contract'},
-    {key:'contractName', label:'Name'},
-    {key:'total', label:'Total'},
-  ];
-  if (hasRocksdb) {
-    cols.push({key:'cacheHits', label:'HIT'});
-    cols.push({key:'cacheMisses', label:'MISS'});
-    cols.push({key:'memtableHits', label:'MEM'});
-    cols.push({key:'accumulatorHits', label:'ACC'});
-    cols.push({key:'cacheHitPercent', label:'Hit %'});
-    cols.push({key:'cacheMissPercent', label:'Miss %'});
-  }
-  cols.push({key:'cold', label:'Cold'});
-  cols.push({key:'warm', label:'Warm'});
-  cols.push({key:'coldPercent', label:'Cold %'});
-  cols.push({key:'bar', label:''});
-
   const header = document.getElementById('accountHeader');
-  header.innerHTML = cols.map(c =>
-    `<th onclick="document.getElementById('sortSelect').value='${c.key}';renderAccountTable()">${c.label}</th>`
-  ).join('');
+  header.innerHTML = cols.map(c => {
+    const cls = c.key === sortCol ? ' class="sorted"' : '';
+    const arrow = c.key === sortCol ? ' \u25BC' : '';
+    return `<th${cls} onclick="setSort('${c.key}')">${c.label}${arrow}</th>`;
+  }).join('');
 
   const body = document.getElementById('accountBody');
   body.innerHTML = accounts.map(a => {
@@ -186,30 +199,44 @@ function renderAccountTable() {
       <td class="addr">${a.address}</td>
       <td class="name">${a.contractName || ''}</td>
       <td><b>${a.total}</b></td>`;
-    if (hasRocksdb) {
-      row += `<td style="color:var(--hit)">${a.cacheHits}</td>
-        <td style="color:var(--miss)">${a.cacheMisses}</td>
-        <td style="color:var(--mem)">${a.memtableHits}</td>
-        <td style="color:var(--acc)">${a.accumulatorHits}</td>
-        <td>${a.cacheHitPercent}%</td>
-        <td>${a.cacheMissPercent}%</td>`;
+
+    for (let i = 3; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.type === 'bar') {
+        if (hasRocksdb) {
+          const hitW = Math.max(1, (a.cacheHitPercent||0) * 0.6);
+          const missW = Math.max(1, (a.cacheMissPercent||0) * 0.6);
+          const nfW = Math.max(1, (a.notFoundPercent||0) * 0.6);
+          row += `<td>
+            <span class="pct-bar" style="background:var(--hit);width:${hitW}px"></span>
+            <span class="pct-bar" style="background:var(--miss);width:${missW}px"></span>
+            <span class="pct-bar" style="background:var(--nf);width:${nfW}px"></span>
+          </td>`;
+        } else {
+          row += `<td>
+            <span class="pct-bar" style="background:var(--cold);width:${(a.coldPercent||0)*0.6}px"></span>
+            <span class="pct-bar" style="background:var(--warm);width:${(a.warmPercent||0)*0.6}px"></span>
+          </td>`;
+        }
+      } else {
+        const val = a[c.key];
+        const disp = typeof val === 'number' && c.label.includes('%') ? val + '%' : (val ?? '');
+        const style = c.color ? ` style="color:${c.color}"` : '';
+        row += `<td${style}>${disp}</td>`;
+      }
     }
-    row += `<td style="color:var(--cold)">${a.cold}</td>
-      <td style="color:var(--warm)">${a.warm}</td>
-      <td>${a.coldPercent}%</td>
-      <td>`;
-    if (hasRocksdb) {
-      const hitW = Math.max(1, a.cacheHitPercent * 0.6);
-      const missW = Math.max(1, a.cacheMissPercent * 0.6);
-      row += `<span class="pct-bar" style="background:var(--hit);width:${hitW}px"></span>`;
-      row += `<span class="pct-bar" style="background:var(--miss);width:${missW}px"></span>`;
-    } else {
-      row += `<span class="pct-bar" style="background:var(--cold);width:${a.coldPercent*0.6}px"></span>`;
-      row += `<span class="pct-bar" style="background:var(--warm);width:${a.warmPercent*0.6}px"></span>`;
-    }
-    row += `</td></tr>`;
+    row += `</tr>`;
     return row;
   }).join('');
+}
+
+function setSort(col) {
+  sortCol = col;
+  const sel = document.getElementById('sortSelect');
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === col) { sel.selectedIndex = i; break; }
+  }
+  renderAccountTable();
 }
 
 async function toggleSlots(row, address) {
@@ -222,19 +249,20 @@ async function toggleSlots(row, address) {
   if (!data.sloads || data.sloads.length === 0) return;
 
   const hasRocksdb = currentData.rocksdbStats;
-  const colSpan = hasRocksdb ? 14 : 8;
+  const totalCols = document.querySelectorAll('#accountHeader th').length;
   let innerCols = '<th>Slot</th><th>Storage</th><th>EVM</th><th>Tx#</th>';
 
   const detail = document.createElement('tr');
   detail.className = 'slot-detail';
-  detail.innerHTML = `<td colspan="${colSpan}"><table style="width:100%"><thead><tr>${innerCols}</tr></thead><tbody>` +
+  detail.innerHTML = `<td colspan="${totalCols}"><table style="width:100%"><thead><tr>${innerCols}</tr></thead><tbody>` +
     data.sloads.map(s => {
-      const stClass = s.storageType === 'HIT' ? 'hit' : s.storageType === 'MISS' ? 'miss' :
-                       s.storageType === 'MEMTABLE' ? 'mem' : 'acc';
+      const st = s.storageType || 'UNKNOWN';
+      const stClass = st === 'HIT' ? 'hit' : st === 'MISS' ? 'miss' :
+                       st === 'NOT_FOUND' ? 'nf' : st === 'MEMTABLE' ? 'mem' : 'acc';
       const evmClass = s.cold ? 'cold' : 'warm';
       return `<tr>
         <td class="addr">${s.slot}</td>
-        <td><span class="badge ${stClass}">${s.storageType}</span></td>
+        <td><span class="badge ${stClass}">${st}</span></td>
         <td><span class="badge ${evmClass}">${s.cold?'COLD':'WARM'}</span></td>
         <td>${s.txIndex}</td>
       </tr>`;
@@ -252,6 +280,7 @@ async function loadRecent() {
         <td>${b.blockNumber}</td><td>${b.txCount}</td><td>${b.totalSloads}</td>
         <td style="color:var(--hit)">${b.cacheHits||0}</td>
         <td style="color:var(--miss)">${b.cacheMisses||0}</td>
+        <td style="color:var(--nf)">${b.notFound||0}</td>
         <td style="color:var(--mem)">${b.memtableHits||0}</td>
         <td style="color:var(--acc)">${b.accumulatorHits||0}</td>
         <td style="color:var(--cold)">${b.coldSloads}</td>

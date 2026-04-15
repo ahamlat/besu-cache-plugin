@@ -20,6 +20,7 @@ public record BlockAnalysisResult(
     int cacheHits,
     int cacheMisses,
     int memtableHits,
+    int notFound,
     int accumulatorHits,
     boolean rocksdbStatsAvailable) {
 
@@ -42,20 +43,21 @@ public record BlockAnalysisResult(
       final boolean rocksdbStatsAvailable) {
 
     int cold = 0, warm = 0;
-    int totalHit = 0, totalMiss = 0, totalMem = 0, totalAcc = 0;
-    // perAccount: [cold, warm, cacheHit, cacheMiss, memtable, accumulator]
+    int totalHit = 0, totalMiss = 0, totalMem = 0, totalNf = 0, totalAcc = 0;
+    // perAccount: [cold, warm, cacheHit, cacheMiss, memtable, notFound, accumulator]
     Map<String, int[]> perAccount = new LinkedHashMap<>();
 
     for (SloadRecord r : sloads) {
       String addr = r.contractAddress().toHexString().toLowerCase();
-      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[6]);
+      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[7]);
       if (r.isCold()) { cold++; counts[0]++; } else { warm++; counts[1]++; }
 
       switch (r.storageType()) {
         case "HIT" -> { totalHit++; counts[2]++; }
         case "MISS" -> { totalMiss++; counts[3]++; }
         case "MEMTABLE" -> { totalMem++; counts[4]++; }
-        default -> { totalAcc++; counts[5]++; }
+        case "NOT_FOUND" -> { totalNf++; counts[5]++; }
+        default -> { totalAcc++; counts[6]++; }
       }
     }
 
@@ -67,7 +69,7 @@ public record BlockAnalysisResult(
           entry.getKey(),
           name != null ? name : "",
           c[0] + c[1], c[0], c[1],
-          c[2], c[3], c[4], c[5]));
+          c[2], c[3], c[4], c[5], c[6]));
     }
     stats.sort(Comparator.comparingInt(AccountStats::totalReads).reversed());
 
@@ -75,7 +77,7 @@ public record BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
         List.copyOf(sloads), sloads.size(), cold, warm,
         List.copyOf(stats),
-        totalHit, totalMiss, totalMem, totalAcc,
+        totalHit, totalMiss, totalMem, totalNf, totalAcc,
         rocksdbStatsAvailable);
   }
 }

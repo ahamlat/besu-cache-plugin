@@ -28,6 +28,7 @@ public class RocksDBStatsProvider {
   private Object tickerDataMiss;
   private Object tickerMemtableHit;
   private Object tickerMemtableMiss;
+  private Object tickerBloomUseful;
   private boolean available;
 
   public boolean init(final ServiceManager serviceManager) {
@@ -74,6 +75,7 @@ public class RocksDBStatsProvider {
       tickerDataMiss = enumValueOf(tickerTypeClass, "BLOCK_CACHE_DATA_MISS");
       tickerMemtableHit = enumValueOf(tickerTypeClass, "MEMTABLE_HIT");
       tickerMemtableMiss = enumValueOf(tickerTypeClass, "MEMTABLE_MISS");
+      tickerBloomUseful = enumValueOf(tickerTypeClass, "BLOOM_FILTER_USEFUL");
 
       available = true;
       LOG.info("RocksDBStatsProvider initialized - real cache stats available");
@@ -96,7 +98,8 @@ public class RocksDBStatsProvider {
       long dm = (long) getTickerCountMethod.invoke(statistics, tickerDataMiss);
       long mh = (long) getTickerCountMethod.invoke(statistics, tickerMemtableHit);
       long mm = (long) getTickerCountMethod.invoke(statistics, tickerMemtableMiss);
-      return new Snapshot(dh, dm, mh, mm);
+      long bf = (long) getTickerCountMethod.invoke(statistics, tickerBloomUseful);
+      return new Snapshot(dh, dm, mh, mm, bf);
     } catch (Exception e) {
       return Snapshot.EMPTY;
     }
@@ -104,15 +107,17 @@ public class RocksDBStatsProvider {
 
   /** Immutable snapshot of ticker counters at a point in time. */
   public record Snapshot(long dataCacheHit, long dataCacheMiss,
-                         long memtableHit, long memtableMiss) {
-    public static final Snapshot EMPTY = new Snapshot(0, 0, 0, 0);
+                         long memtableHit, long memtableMiss,
+                         long bloomFilterUseful) {
+    public static final Snapshot EMPTY = new Snapshot(0, 0, 0, 0, 0);
 
     public Snapshot delta(final Snapshot before) {
       return new Snapshot(
           dataCacheHit - before.dataCacheHit,
           dataCacheMiss - before.dataCacheMiss,
           memtableHit - before.memtableHit,
-          memtableMiss - before.memtableMiss);
+          memtableMiss - before.memtableMiss,
+          bloomFilterUseful - before.bloomFilterUseful);
     }
 
     /**
@@ -120,14 +125,16 @@ public class RocksDBStatsProvider {
      * <ul>
      *   <li>MEMTABLE: memtable was hit, no data block reads</li>
      *   <li>HIT: at least one data block cache hit, no data block miss</li>
-     *   <li>MISS: at least one data block cache miss</li>
-     *   <li>ACCUMULATOR: no RocksDB reads at all (value from Bonsai accumulator)</li>
+     *   <li>MISS: at least one data block cache miss (had to read from SST)</li>
+     *   <li>NOT_FOUND: bloom filter rejected the lookup (key doesn't exist in DB)</li>
+     *   <li>ACCUMULATOR: no RocksDB activity at all (value from Bonsai accumulator)</li>
      * </ul>
      */
     public String classify() {
       if (memtableHit > 0 && dataCacheHit == 0 && dataCacheMiss == 0) return "MEMTABLE";
       if (dataCacheHit > 0 && dataCacheMiss == 0) return "HIT";
       if (dataCacheMiss > 0) return "MISS";
+      if (bloomFilterUseful > 0) return "NOT_FOUND";
       return "ACCUMULATOR";
     }
   }

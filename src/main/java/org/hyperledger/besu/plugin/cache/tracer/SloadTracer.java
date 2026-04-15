@@ -145,10 +145,11 @@ public class SloadTracer implements BlockAwareOperationTracer {
         statsProvider.isAvailable());
 
     store.store(result);
-    LOG.info("Block {} analyzed: {} SLOADs ({} cold, {} warm | {} HIT, {} MISS, {} MEM, {} ACC) "
-            + "across {} contracts",
+    LOG.info("Block {} analyzed: {} SLOADs ({} cold, {} warm | "
+            + "{} HIT, {} MISS, {} MEM, {} NOTFOUND, {} ACC) across {} contracts",
         currentBlockNumber, result.totalSloads(), result.coldSloads(), result.warmSloads(),
-        result.cacheHits(), result.cacheMisses(), result.memtableHits(), result.accumulatorHits(),
+        result.cacheHits(), result.cacheMisses(), result.memtableHits(),
+        result.notFound(), result.accumulatorHits(),
         result.accountStats().size());
   }
 }

@@ -106,6 +106,7 @@ public class CacheAnalysisRpcMethods {
       entry.put("cacheHits", r.cacheHits());
       entry.put("cacheMisses", r.cacheMisses());
       entry.put("memtableHits", r.memtableHits());
+      entry.put("notFound", r.notFound());
       entry.put("accumulatorHits", r.accumulatorHits());
       entry.put("contracts", r.accountStats().size());
       entry.put("txCount", r.transactionCount());
@@ -148,6 +149,7 @@ public class CacheAnalysisRpcMethods {
     response.put("cacheHits", r.cacheHits());
     response.put("cacheMisses", r.cacheMisses());
     response.put("memtableHits", r.memtableHits());
+    response.put("notFound", r.notFound());
     response.put("accumulatorHits", r.accumulatorHits());
     response.put("cacheHitPercent", Math.round(r.cacheHitPercent() * 10.0) / 10.0);
     response.put("rocksdbStats", r.rocksdbStatsAvailable());
@@ -165,8 +167,10 @@ public class CacheAnalysisRpcMethods {
       acc.put("cacheHits", a.cacheHits());
       acc.put("cacheMisses", a.cacheMisses());
       acc.put("memtableHits", a.memtableHits());
+      acc.put("notFound", a.notFound());
       acc.put("accumulatorHits", a.accumulatorHits());
       acc.put("cacheHitPercent", Math.round(a.cacheHitPercent() * 10.0) / 10.0);
+      acc.put("notFoundPercent", Math.round(a.notFoundPercent() * 10.0) / 10.0);
       acc.put("cacheMissPercent", Math.round(a.cacheMissPercent() * 10.0) / 10.0);
       accounts.add(acc);
     }

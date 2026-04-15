@@ -10,6 +10,7 @@ public record AccountStats(
     int cacheHits,
     int cacheMisses,
     int memtableHits,
+    int notFound,
     int accumulatorHits) {
 
   public double coldPercent() {
@@ -26,5 +27,9 @@ public record AccountStats(
 
   public double cacheMissPercent() {
     return totalReads > 0 ? cacheMisses * 100.0 / totalReads : 0;
+  }
+
+  public double notFoundPercent() {
+    return totalReads > 0 ? notFound * 100.0 / totalReads : 0;
   }
 }
