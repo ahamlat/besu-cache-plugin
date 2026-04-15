@@ -32,7 +32,7 @@ public class CacheAnalysisPlugin implements BesuPlugin {
 
   private static final Logger LOG = LoggerFactory.getLogger(CacheAnalysisPlugin.class);
 
-  private static final int DEFAULT_WEB_PORT = 8547;
+  private static final int DEFAULT_WEB_PORT = 8548;
   private static final int DEFAULT_MAX_BLOCKS = 1000;
 
   private ServiceManager serviceManager;
