@@ -57,15 +57,8 @@ public class SloadTracer implements BlockAwareOperationTracer {
       final BlockHeader blockHeader,
       final BlockBody blockBody,
       final Address miningBeneficiary) {
-    sloads.clear();
-    txIndex = -1;
-    pendingAddress = null;
-    pendingSlot = null;
-    currentBlockNumber = blockHeader.getNumber();
-    currentBlockHash = blockHeader.getBlockHash().toHexString();
-    currentBlockTimestamp = blockHeader.getTimestamp();
-    currentTxCount = blockBody.getTransactions().size();
-    LOG.debug("SloadTracer: start block {}", currentBlockNumber);
+    resetBlock(blockHeader.getNumber(), blockHeader.getBlockHash().toHexString(),
+        blockHeader.getTimestamp());
   }
 
   @Override
@@ -73,20 +66,24 @@ public class SloadTracer implements BlockAwareOperationTracer {
       final WorldView worldView,
       final ProcessableBlockHeader processableBlockHeader,
       final Address miningBeneficiary) {
-    // block building path -- still trace it
+    resetBlock(processableBlockHeader.getNumber(), "", processableBlockHeader.getTimestamp());
+  }
+
+  private void resetBlock(final long blockNum, final String blockHash, final long timestamp) {
     sloads.clear();
     txIndex = -1;
     pendingAddress = null;
     pendingSlot = null;
-    currentBlockNumber = processableBlockHeader.getNumber();
-    currentBlockHash = "";
-    currentBlockTimestamp = processableBlockHeader.getTimestamp();
+    currentBlockNumber = blockNum;
+    currentBlockHash = blockHash;
+    currentBlockTimestamp = timestamp;
     currentTxCount = 0;
   }
 
   @Override
   public void traceStartTransaction(final WorldView worldView, final Transaction transaction) {
     txIndex++;
+    currentTxCount++;
   }
 
   @Override
@@ -115,6 +112,9 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   @Override
   public void traceEndBlock(final BlockHeader blockHeader, final BlockBody blockBody) {
+    if (currentBlockHash.isEmpty()) {
+      currentBlockHash = blockHeader.getBlockHash().toHexString();
+    }
     BlockAnalysisResult result = BlockAnalysisResult.build(
         currentBlockNumber,
         currentBlockHash,
