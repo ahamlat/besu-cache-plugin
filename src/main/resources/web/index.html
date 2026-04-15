@@ -11,72 +11,75 @@
           --hit: #3fb950; --miss: #f85149; --mem: #d29922; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-         background: var(--bg); color: var(--text); padding: 20px; }
-  h1 { font-size: 1.4em; margin-bottom: 16px; color: var(--accent); }
-  .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+         background: var(--bg); color: var(--text); padding: 16px 20px; font-size: 13px; }
+  h1 { font-size: 1.3em; margin-bottom: 12px; color: var(--accent); }
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
   .controls input, .controls select, .controls button {
     background: var(--surface); border: 1px solid var(--border); color: var(--text);
-    padding: 8px 12px; border-radius: 6px; font-size: 14px; }
+    padding: 6px 10px; border-radius: 5px; font-size: 13px; }
   .controls button { cursor: pointer; background: var(--accent); color: #000; font-weight: 600; border: none; }
   .controls button:hover { opacity: 0.9; }
   .controls button.toggle-on { background: var(--warm); }
-  .summary { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-               padding: 10px 16px; min-width: 120px; }
-  .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .stat-card .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
-  .stat-card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  #status { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+  .block-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                gap: 8px; margin-bottom: 14px; }
+  .bi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+        padding: 8px 12px; }
+  .bi .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+  .bi .val { font-size: 18px; font-weight: 700; margin-top: 1px; }
+  .bi .sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+  .gas-bar { height: 4px; border-radius: 2px; background: var(--border); margin-top: 4px; }
+  .gas-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+
   table { width: 100%; border-collapse: collapse; background: var(--surface);
-          border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 12px; }
+          border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); font-size: 12px; }
   th { background: #1c2128; cursor: pointer; user-select: none; white-space: nowrap; }
   th:hover { color: var(--accent); }
   th.sorted { color: var(--accent); }
-  tr:hover td { background: rgba(88,166,255,0.05); }
+  tr:hover td { background: rgba(88,166,255,0.04); }
   .addr { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 11px; }
   .name { color: var(--accent); font-weight: 500; }
-  .pct-bar { display: inline-block; height: 6px; border-radius: 3px; min-width: 2px; }
-  .recent-table th, .recent-table td { font-size: 11px; padding: 5px 8px; }
+  .pct-bar { display: inline-block; height: 5px; border-radius: 2px; min-width: 1px; }
+  .section-title { font-size: 1em; margin: 14px 0 6px 0; color: var(--muted); }
+  .recent-table th, .recent-table td { font-size: 11px; padding: 4px 7px; }
   .recent-table tr { cursor: pointer; }
-  .recent-table tr:hover td { background: rgba(88,166,255,0.1); }
-  .section-title { font-size: 1.05em; margin: 20px 0 8px 0; color: var(--muted); }
+  .recent-table tr:hover td { background: rgba(88,166,255,0.08); }
   .slot-detail { background: #1c2128; }
-  .slot-detail td { border-bottom: 1px solid #252c35; padding: 4px 10px; font-size: 11px; }
+  .slot-detail td { border-bottom: 1px solid #252c35; padding: 3px 8px; font-size: 11px; }
   .hidden { display: none; }
-  #status { font-size: 11px; color: var(--muted); margin-left: auto; }
-  .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px;
+  .badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px;
            font-weight: 600; text-transform: uppercase; }
-  .badge.read { background: rgba(88,166,255,0.2); color: var(--read); }
-  .badge.nf { background: rgba(240,136,62,0.2); color: var(--nf); }
-  .badge.cached { background: rgba(139,148,158,0.2); color: var(--cached); }
-  .badge.cold { background: rgba(248,81,73,0.2); color: var(--cold); }
-  .badge.warm { background: rgba(63,185,80,0.2); color: var(--warm); }
+  .badge.read { background: rgba(88,166,255,0.15); color: var(--read); }
+  .badge.nf { background: rgba(240,136,62,0.15); color: var(--nf); }
+  .badge.cached { background: rgba(139,148,158,0.15); color: var(--cached); }
+  .badge.cold { background: rgba(248,81,73,0.15); color: var(--cold); }
+  .badge.warm { background: rgba(63,185,80,0.15); color: var(--warm); }
+  .loading { color: var(--muted); font-style: italic; padding: 12px; }
 </style>
 </head>
 <body>
 <h1>Besu SLOAD Cache Analysis</h1>
 
 <div class="controls">
-  <input id="blockInput" type="text" placeholder="Block number or 'latest'" value="latest">
+  <input id="blockInput" type="text" placeholder="Block # or 'latest'" value="latest" style="width:160px">
   <button onclick="loadBlock()">Load</button>
   <button id="autoBtn" onclick="toggleAuto()">Auto-refresh: OFF</button>
   <select id="sortSelect" onchange="sortCol=this.value;renderAccountTable()">
-    <option value="total">Sort by: Total</option>
-    <option value="storageReads">Sort by: Storage Reads</option>
-    <option value="notFound">Sort by: Not Found</option>
-    <option value="cached">Sort by: Cached</option>
-    <option value="notFoundPercent">Sort by: NF %</option>
-    <option value="storageReadPercent">Sort by: Read %</option>
-    <option value="cachedPercent">Sort by: Cached %</option>
-    <option value="cold">Sort by: Cold</option>
-    <option value="warm">Sort by: Warm</option>
-    <option value="coldPercent">Sort by: Cold %</option>
-    <option value="contractName">Sort by: Name</option>
+    <option value="total">Sort: Total</option>
+    <option value="storageReads">Sort: Reads</option>
+    <option value="notFound">Sort: NotFound</option>
+    <option value="cached">Sort: Cached</option>
+    <option value="notFoundPercent">Sort: NF%</option>
+    <option value="cold">Sort: Cold</option>
+    <option value="contractName">Sort: Name</option>
   </select>
   <span id="status"></span>
 </div>
 
-<div class="summary" id="summaryCards"></div>
+<div id="blockInfo" class="block-info hidden"></div>
 
 <div id="accountSection" class="hidden">
   <div class="section-title">Per-Contract Breakdown</div>
@@ -89,7 +92,7 @@
 <div class="section-title">Recent Blocks</div>
 <table class="recent-table" id="recentTable">
   <thead>
-    <tr><th>Block</th><th>Txs</th><th>SLOADs</th>
+    <tr><th>Block</th><th>Time</th><th>Txs</th><th>Gas</th><th>SLOADs</th>
         <th>Read</th><th>NotFnd</th><th>Cached</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
@@ -101,10 +104,31 @@ let currentData = null;
 let autoRefresh = false;
 let autoTimer = null;
 let sortCol = 'total';
+let recentLoaded = false;
 
 async function fetchJson(url) {
   const r = await fetch(url);
   return r.json();
+}
+
+function fmt(n) {
+  if (n === undefined || n === null) return '-';
+  if (typeof n !== 'number') return n;
+  return n.toLocaleString();
+}
+
+function fmtGas(n) {
+  if (!n) return '0';
+  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(0) + 'K';
+  return n.toString();
+}
+
+function fmtMs(ms) {
+  if (!ms && ms !== 0) return '-';
+  if (ms >= 1000) return (ms/1000).toFixed(2) + 's';
+  return ms + 'ms';
 }
 
 async function loadBlock() {
@@ -113,49 +137,58 @@ async function loadBlock() {
     const data = await fetchJson('/api/block/' + val);
     if (data.error) { alert(data.error); return; }
     currentData = data;
-    renderSummary(data);
+    renderBlockInfo(data);
     renderAccountTable();
+    document.getElementById('blockInfo').classList.remove('hidden');
     document.getElementById('accountSection').classList.remove('hidden');
   } catch(e) { console.error(e); }
-  loadRecent();
+  if (!recentLoaded) { loadRecent(); recentLoaded = true; }
   loadStatus();
 }
 
-function pct(n, total) {
-  return total > 0 ? Math.round(n * 1000 / total) / 10 : 0;
-}
-
-function renderSummary(d) {
+function renderBlockInfo(d) {
+  const el = document.getElementById('blockInfo');
+  const uniqueSlots = d.storageReads + d.notFound;
+  const gasP = d.gasUsedPercent || 0;
   const hasRdb = d.rocksdbStats;
-  const firstReadCount = d.storageReads + d.notFound;
-  let cards = `
-    <div class="stat-card"><div class="label">Block</div><div class="value">${d.blockNumber}</div></div>
-    <div class="stat-card"><div class="label">Transactions</div><div class="value">${d.transactionCount}</div></div>
-    <div class="stat-card"><div class="label">Total SLOADs</div><div class="value">${d.totalSloads}</div>
-      <div class="sub">${firstReadCount} unique slots</div></div>
-    <div class="stat-card"><div class="label">Storage Read</div><div class="value" style="color:var(--read)">${d.storageReads}</div>
-      <div class="sub">1st read, value found</div></div>
-    <div class="stat-card"><div class="label">Not Found</div><div class="value" style="color:var(--nf)">${d.notFound}</div>
-      <div class="sub">1st read, slot empty</div></div>
-    <div class="stat-card"><div class="label">Cached</div><div class="value" style="color:var(--cached)">${d.cached}</div>
-      <div class="sub">repeat read in block</div></div>
-    <div class="stat-card"><div class="label">Cold (EVM)</div><div class="value" style="color:var(--cold)">${d.coldSloads}</div></div>
-    <div class="stat-card"><div class="label">Warm (EVM)</div><div class="value" style="color:var(--warm)">${d.warmSloads}</div></div>
-    <div class="stat-card"><div class="label">Contracts</div><div class="value">${d.accounts.length}</div></div>`;
 
-  if (hasRdb) {
-    cards += `
-    <div class="stat-card" style="border-color:#30363d">
-      <div class="label">RocksDB Block Stats</div>
-      <div class="sub" style="margin-top:4px">
-        <span style="color:var(--hit)">Data Hit: ${d.blockDataCacheHit}</span> &nbsp;
-        <span style="color:var(--miss)">Data Miss: ${d.blockDataCacheMiss}</span> &nbsp;
-        <span style="color:var(--mem)">Memtable: ${d.blockMemtableHit}</span>
-      </div>
-    </div>`;
+  let html = `
+    <div class="bi"><div class="lbl">Block</div><div class="val">${fmt(d.blockNumber)}</div></div>
+    <div class="bi"><div class="lbl">Exec Time</div><div class="val">${fmtMs(d.executionTimeMs)}</div></div>
+    <div class="bi"><div class="lbl">Transactions</div><div class="val">${d.transactionCount}</div></div>
+    <div class="bi"><div class="lbl">Gas Used</div><div class="val">${fmtGas(d.gasUsed)}</div>
+      <div class="sub">${gasP}% of ${fmtGas(d.gasLimit)}</div>
+      <div class="gas-bar"><div class="gas-bar-fill" style="width:${gasP}%"></div></div></div>
+    <div class="bi"><div class="lbl">Base Fee</div><div class="val">${d.baseFeeGwei} Gwei</div></div>`;
+
+  if (d.blobTxCount > 0 || d.blobGasUsed > 0) {
+    html += `<div class="bi"><div class="lbl">Blob Txs</div><div class="val">${d.blobTxCount}</div>
+      <div class="sub">${fmtGas(d.blobGasUsed)} blob gas</div></div>`;
   }
 
-  document.getElementById('summaryCards').innerHTML = cards;
+  html += `
+    <div class="bi"><div class="lbl">Total SLOADs</div><div class="val">${fmt(d.totalSloads)}</div>
+      <div class="sub">${uniqueSlots} unique slots</div></div>
+    <div class="bi"><div class="lbl">Storage Read</div><div class="val" style="color:var(--read)">${fmt(d.storageReads)}</div>
+      <div class="sub">1st read, value found</div></div>
+    <div class="bi"><div class="lbl">Not Found</div><div class="val" style="color:var(--nf)">${fmt(d.notFound)}</div>
+      <div class="sub">1st read, slot empty</div></div>
+    <div class="bi"><div class="lbl">Cached</div><div class="val" style="color:var(--cached)">${fmt(d.cached)}</div>
+      <div class="sub">repeat read in block</div></div>
+    <div class="bi"><div class="lbl">Cold (EVM)</div><div class="val" style="color:var(--cold)">${fmt(d.coldSloads)}</div></div>
+    <div class="bi"><div class="lbl">Warm (EVM)</div><div class="val" style="color:var(--warm)">${fmt(d.warmSloads)}</div></div>
+    <div class="bi"><div class="lbl">Contracts</div><div class="val">${d.accounts.length}</div></div>`;
+
+  if (hasRdb) {
+    html += `<div class="bi"><div class="lbl">RocksDB Block</div>
+      <div class="sub" style="margin-top:3px">
+        <span style="color:var(--hit)">Hit ${fmt(d.blockDataCacheHit)}</span>&ensp;
+        <span style="color:var(--miss)">Miss ${fmt(d.blockDataCacheMiss)}</span>&ensp;
+        <span style="color:var(--mem)">Mem ${fmt(d.blockMemtableHit)}</span>
+      </div></div>`;
+  }
+
+  el.innerHTML = html;
 }
 
 function colDefs() {
@@ -166,12 +199,12 @@ function colDefs() {
     {key:'storageReads', label:'Read', type:'number', color:'var(--read)'},
     {key:'notFound', label:'NotFnd', type:'number', color:'var(--nf)'},
     {key:'cached', label:'Cached', type:'number', color:'var(--cached)'},
-    {key:'storageReadPercent', label:'Read %', type:'number'},
-    {key:'notFoundPercent', label:'NF %', type:'number'},
-    {key:'cachedPercent', label:'Cch %', type:'number'},
+    {key:'storageReadPercent', label:'Rd%', type:'number'},
+    {key:'notFoundPercent', label:'NF%', type:'number'},
+    {key:'cachedPercent', label:'Cch%', type:'number'},
     {key:'cold', label:'Cold', type:'number', color:'var(--cold)'},
     {key:'warm', label:'Warm', type:'number', color:'var(--warm)'},
-    {key:'coldPercent', label:'Cold %', type:'number'},
+    {key:'coldPercent', label:'Cold%', type:'number'},
     {key:'bar', label:'', type:'bar'}
   ];
 }
@@ -184,9 +217,7 @@ function renderAccountTable() {
   accounts.sort((a,b) => {
     if (sortCol === 'bar') return 0;
     let va = a[sortCol], vb = b[sortCol];
-    if (typeof va === 'string' || typeof vb === 'string') {
-      return (va||'').localeCompare(vb||'');
-    }
+    if (typeof va === 'string' || typeof vb === 'string') return (va||'').localeCompare(vb||'');
     return (vb||0) - (va||0);
   });
 
@@ -203,18 +234,15 @@ function renderAccountTable() {
       <td class="addr">${a.address}</td>
       <td class="name">${a.contractName || ''}</td>
       <td><b>${a.total}</b></td>`;
-
     for (let i = 3; i < cols.length; i++) {
       const c = cols[i];
       if (c.type === 'bar') {
-        const rdW = Math.max(1, (a.storageReadPercent||0) * 0.6);
-        const nfW = Math.max(1, (a.notFoundPercent||0) * 0.6);
-        const ccW = Math.max(1, (a.cachedPercent||0) * 0.6);
-        row += `<td>
-          <span class="pct-bar" style="background:var(--read);width:${rdW}px"></span>
+        const rdW = Math.max(1, (a.storageReadPercent||0) * 0.5);
+        const nfW = Math.max(1, (a.notFoundPercent||0) * 0.5);
+        const ccW = Math.max(1, (a.cachedPercent||0) * 0.5);
+        row += `<td><span class="pct-bar" style="background:var(--read);width:${rdW}px"></span>
           <span class="pct-bar" style="background:var(--nf);width:${nfW}px"></span>
-          <span class="pct-bar" style="background:var(--cached);width:${ccW}px"></span>
-        </td>`;
+          <span class="pct-bar" style="background:var(--cached);width:${ccW}px"></span></td>`;
       } else {
         const val = a[c.key];
         const disp = typeof val === 'number' && c.label.includes('%') ? val + '%' : (val ?? '');
@@ -238,14 +266,17 @@ function setSort(col) {
 
 async function toggleSlots(row, address) {
   const next = row.nextElementSibling;
-  if (next && next.classList.contains('slot-detail')) {
-    next.remove();
-    return;
-  }
-  const data = await fetchJson('/api/block/' + currentData.blockNumber + '/sloads?address=' + address);
-  if (!data.sloads || data.sloads.length === 0) return;
-
+  if (next && next.classList.contains('slot-detail')) { next.remove(); return; }
   const totalCols = document.querySelectorAll('#accountHeader th').length;
+
+  const loadingRow = document.createElement('tr');
+  loadingRow.className = 'slot-detail';
+  loadingRow.innerHTML = `<td colspan="${totalCols}" class="loading">Loading slots...</td>`;
+  row.after(loadingRow);
+
+  const data = await fetchJson('/api/block/' + currentData.blockNumber + '/sloads?address=' + address);
+  loadingRow.remove();
+  if (!data.sloads || data.sloads.length === 0) return;
 
   const detail = document.createElement('tr');
   detail.className = 'slot-detail';
@@ -255,15 +286,12 @@ async function toggleSlots(row, address) {
       const st = s.storageType || 'UNKNOWN';
       const stClass = st === 'STORAGE_READ' ? 'read' : st === 'NOT_FOUND' ? 'nf' : 'cached';
       const evmClass = s.cold ? 'cold' : 'warm';
-      return `<tr>
-        <td style="color:var(--muted)">${i+1}</td>
+      return `<tr><td style="color:var(--muted)">${i+1}</td>
         <td class="addr">${s.slot}</td>
         <td><span class="badge ${stClass}">${st}</span></td>
         <td><span class="badge ${evmClass}">${s.cold?'COLD':'WARM'}</span></td>
-        <td>${s.txIndex}</td>
-      </tr>`;
-    }).join('') +
-    '</tbody></table></td>';
+        <td>${s.txIndex}</td></tr>`;
+    }).join('') + '</tbody></table></td>';
   row.after(detail);
 }
 
@@ -273,15 +301,18 @@ async function loadRecent() {
     const body = document.getElementById('recentBody');
     body.innerHTML = data.map(b => `
       <tr onclick="document.getElementById('blockInput').value=${b.blockNumber};loadBlock()">
-        <td>${b.blockNumber}</td><td>${b.txCount}</td><td>${b.totalSloads}</td>
+        <td>${b.blockNumber}</td>
+        <td>${fmtMs(b.executionTimeMs)}</td>
+        <td>${b.txCount}</td>
+        <td>${fmtGas(b.gasUsed)} <span style="color:var(--muted);font-size:10px">(${b.gasUsedPercent}%)</span></td>
+        <td>${b.totalSloads}</td>
         <td style="color:var(--read)">${b.storageReads}</td>
         <td style="color:var(--nf)">${b.notFound}</td>
         <td style="color:var(--cached)">${b.cached}</td>
         <td style="color:var(--cold)">${b.coldSloads}</td>
         <td style="color:var(--warm)">${b.warmSloads}</td>
         <td>${b.contracts}</td>
-      </tr>
-    `).join('');
+      </tr>`).join('');
   } catch(e) {}
 }
 
@@ -291,7 +322,7 @@ async function loadStatus() {
     let parts = [`Blocks: ${s.blocksStored}`, `Names: ${s.contractNamesCached}`];
     if (s.pendingNameResolutions > 0) parts.push(`Pending: ${s.pendingNameResolutions}`);
     parts.push(`Etherscan: ${s.etherscanActive ? 'ON' : 'OFF'}`);
-    parts.push(`RocksDB stats: ${s.rocksdbStatsAvailable ? 'ON' : 'OFF'}`);
+    parts.push(`RocksDB: ${s.rocksdbStatsAvailable ? 'ON' : 'OFF'}`);
     document.getElementById('status').textContent = parts.join(' | ');
   } catch(e) {}
 }
@@ -305,6 +336,7 @@ function toggleAuto() {
     autoTimer = setInterval(() => {
       document.getElementById('blockInput').value = 'latest';
       loadBlock();
+      loadRecent();
     }, 6000);
   } else {
     btn.textContent = 'Auto-refresh: OFF';
@@ -314,7 +346,6 @@ function toggleAuto() {
 }
 
 loadBlock();
-loadRecent();
 loadStatus();
 </script>
 </body>

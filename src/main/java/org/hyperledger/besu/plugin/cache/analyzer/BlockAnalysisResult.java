@@ -9,18 +9,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Complete SLOAD analysis for a single block.
- *
- * <p>Per-SLOAD classification (storageReads / notFound / cached) is based on
- * tracking unique slot accesses within the block:
- * <ul>
- *   <li>STORAGE_READ — first read of a slot in this block, non-zero value returned</li>
- *   <li>NOT_FOUND — first read of a slot in this block, value is zero</li>
- *   <li>CACHED — slot was already read earlier in this block (accumulator cache)</li>
- * </ul>
- *
- * <p>Block-level RocksDB stats (blockDataCacheHit, blockDataCacheMiss, blockMemtableHit)
- * are aggregate ticker deltas across the entire block execution.
+ * Complete SLOAD analysis for a single block, including block metadata
+ * and RocksDB cache statistics.
  */
 public record BlockAnalysisResult(
     long blockNumber,
@@ -38,13 +28,13 @@ public record BlockAnalysisResult(
     long blockDataCacheHit,
     long blockDataCacheMiss,
     long blockMemtableHit,
-    boolean rocksdbStatsAvailable) {
+    boolean rocksdbStatsAvailable,
+    BlockMetadata metadata) {
 
   public double coldPercent() {
     return totalSloads > 0 ? coldSloads * 100.0 / totalSloads : 0;
   }
 
-  /** Build from raw SLOAD records and block-level RocksDB deltas. */
   public static BlockAnalysisResult build(
       final long blockNumber,
       final String blockHash,
@@ -53,11 +43,11 @@ public record BlockAnalysisResult(
       final List<SloadRecord> sloads,
       final java.util.function.Function<String, String> nameResolver,
       final boolean rocksdbStatsAvailable,
-      final RocksDBStatsProvider.Snapshot blockDelta) {
+      final RocksDBStatsProvider.Snapshot blockDelta,
+      final BlockMetadata metadata) {
 
     int cold = 0, warm = 0;
     int totalStorageRead = 0, totalNotFound = 0, totalCached = 0;
-    // perAccount: [cold, warm, storageRead, notFound, cached]
     Map<String, int[]> perAccount = new LinkedHashMap<>();
 
     for (SloadRecord r : sloads) {
@@ -90,6 +80,7 @@ public record BlockAnalysisResult(
         List.copyOf(stats),
         totalStorageRead, totalNotFound, totalCached,
         blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit(),
-        rocksdbStatsAvailable);
+        rocksdbStatsAvailable,
+        metadata);
   }
 }

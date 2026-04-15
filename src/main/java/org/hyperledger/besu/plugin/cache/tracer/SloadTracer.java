@@ -1,6 +1,7 @@
 package org.hyperledger.besu.plugin.cache.tracer;
 
 import org.hyperledger.besu.plugin.cache.analyzer.BlockAnalysisResult;
+import org.hyperledger.besu.plugin.cache.analyzer.BlockMetadata;
 import org.hyperledger.besu.plugin.cache.analyzer.SloadRecord;
 import org.hyperledger.besu.plugin.cache.naming.ContractNameResolver;
 import org.hyperledger.besu.plugin.cache.rocksdb.RocksDBStatsProvider;
@@ -8,6 +9,7 @@ import org.hyperledger.besu.plugin.cache.store.BlockResultStore;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Transaction;
+import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.operation.Operation.OperationResult;
 import org.hyperledger.besu.evm.worldstate.WorldView;
@@ -30,17 +32,11 @@ import org.slf4j.LoggerFactory;
  * Captures every SLOAD during block execution and classifies each as:
  * <ul>
  *   <li>EVM-level: warm/cold (based on gas cost, EIP-2929)</li>
- *   <li>Storage-level:
- *     <ul>
- *       <li>CACHED — slot already read earlier in this block (served from accumulator)</li>
- *       <li>NOT_FOUND — first read in block, value is zero (slot empty/doesn't exist)</li>
- *       <li>STORAGE_READ — first read in block, non-zero value (fetched from storage)</li>
- *     </ul>
- *   </li>
+ *   <li>Storage-level: CACHED / NOT_FOUND / STORAGE_READ</li>
  * </ul>
  *
- * Block-level RocksDB ticker deltas (HIT/MISS/MEMTABLE) are captured
- * between traceStartBlock and traceEndBlock for aggregate statistics.
+ * Also captures block metadata (gas, base fee, blob info) and
+ * measures wall-clock execution time between traceStartBlock and traceEndBlock.
  */
 public class SloadTracer implements BlockAwareOperationTracer {
 
@@ -57,17 +53,15 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private int currentTxCount;
   private int txIndex = -1;
   private final List<SloadRecord> sloads = new ArrayList<>();
-
-  /**
-   * Tracks (address + slot) pairs already read in this block.
-   * If a slot was already read, the accumulator serves it from memory.
-   */
   private final Set<SlotKey> seenSlots = new HashSet<>();
 
   private Address pendingAddress;
   private UInt256 pendingSlot;
 
   private RocksDBStatsProvider.Snapshot blockStartSnapshot;
+  private long blockStartNanos;
+  private long currentGasLimit;
+  private long currentBaseFeeWei;
 
   public SloadTracer(
       final BlockResultStore store,
@@ -85,7 +79,8 @@ public class SloadTracer implements BlockAwareOperationTracer {
       final BlockBody blockBody,
       final Address miningBeneficiary) {
     resetBlock(blockHeader.getNumber(), blockHeader.getBlockHash().toHexString(),
-        blockHeader.getTimestamp());
+        blockHeader.getTimestamp(), blockHeader.getGasLimit(),
+        blockHeader.getBaseFee().map(q -> q.getAsBigInteger().longValueExact()).orElse(0L));
   }
 
   @Override
@@ -93,10 +88,13 @@ public class SloadTracer implements BlockAwareOperationTracer {
       final WorldView worldView,
       final ProcessableBlockHeader processableBlockHeader,
       final Address miningBeneficiary) {
-    resetBlock(processableBlockHeader.getNumber(), "", processableBlockHeader.getTimestamp());
+    resetBlock(processableBlockHeader.getNumber(), "", processableBlockHeader.getTimestamp(),
+        processableBlockHeader.getGasLimit(),
+        processableBlockHeader.getBaseFee().map(q -> q.getAsBigInteger().longValueExact()).orElse(0L));
   }
 
-  private void resetBlock(final long blockNum, final String blockHash, final long timestamp) {
+  private void resetBlock(final long blockNum, final String blockHash, final long timestamp,
+      final long gasLimit, final long baseFeeWei) {
     sloads.clear();
     seenSlots.clear();
     txIndex = -1;
@@ -106,7 +104,10 @@ public class SloadTracer implements BlockAwareOperationTracer {
     currentBlockHash = blockHash;
     currentBlockTimestamp = timestamp;
     currentTxCount = 0;
+    currentGasLimit = gasLimit;
+    currentBaseFeeWei = baseFeeWei;
     blockStartSnapshot = statsProvider.snapshot();
+    blockStartNanos = System.nanoTime();
   }
 
   @Override
@@ -151,9 +152,24 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   @Override
   public void traceEndBlock(final BlockHeader blockHeader, final BlockBody blockBody) {
+    long executionTimeMs = (System.nanoTime() - blockStartNanos) / 1_000_000;
+
     if (currentBlockHash.isEmpty()) {
       currentBlockHash = blockHeader.getBlockHash().toHexString();
     }
+
+    long gasUsed = blockHeader.getGasUsed();
+    long blobGasUsed = blockHeader.getBlobGasUsed().map(Long::longValue).orElse(0L);
+    int blobTxCount = 0;
+    for (var tx : blockBody.getTransactions()) {
+      if (tx.getType() == TransactionType.BLOB) {
+        blobTxCount++;
+      }
+    }
+
+    BlockMetadata metadata = new BlockMetadata(
+        executionTimeMs, gasUsed, currentGasLimit, currentBaseFeeWei,
+        blobGasUsed, blobTxCount);
 
     RocksDBStatsProvider.Snapshot blockEndSnapshot = statsProvider.snapshot();
     RocksDBStatsProvider.Snapshot blockDelta = blockEndSnapshot.delta(blockStartSnapshot);
@@ -166,20 +182,16 @@ public class SloadTracer implements BlockAwareOperationTracer {
         sloads,
         addr -> nameResolver.getName(addr),
         statsProvider.isAvailable(),
-        blockDelta);
+        blockDelta,
+        metadata);
 
     store.store(result);
-    LOG.info("Block {} analyzed: {} SLOADs ({} cold, {} warm | "
-            + "{} STORAGE_READ, {} NOT_FOUND, {} CACHED) across {} contracts "
-            + "[RocksDB block: {} data-hit, {} data-miss, {} memtable]",
-        currentBlockNumber, result.totalSloads(), result.coldSloads(), result.warmSloads(),
+    LOG.info("Block {} analyzed in {}ms: {} SLOADs ({} read, {} notfound, {} cached) "
+            + "gas {}/{} across {} contracts",
+        currentBlockNumber, executionTimeMs, result.totalSloads(),
         result.storageReads(), result.notFound(), result.cached(),
-        result.accountStats().size(),
-        blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit());
+        gasUsed, currentGasLimit, result.accountStats().size());
   }
 
-  /**
-   * Composite key for tracking unique (address, slot) pairs within a block.
-   */
   private record SlotKey(Address address, UInt256 slot) {}
 }

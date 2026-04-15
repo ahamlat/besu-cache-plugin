@@ -2,6 +2,7 @@ package org.hyperledger.besu.plugin.cache.web;
 
 import org.hyperledger.besu.plugin.cache.analyzer.AccountStats;
 import org.hyperledger.besu.plugin.cache.analyzer.BlockAnalysisResult;
+import org.hyperledger.besu.plugin.cache.analyzer.BlockMetadata;
 import org.hyperledger.besu.plugin.cache.analyzer.SloadRecord;
 import org.hyperledger.besu.plugin.cache.naming.ContractNameResolver;
 import org.hyperledger.besu.plugin.cache.rocksdb.RocksDBStatsProvider;
@@ -174,8 +175,8 @@ public class WebUiServer {
     entry.put("cached", r.cached());
     entry.put("coldSloads", r.coldSloads());
     entry.put("warmSloads", r.warmSloads());
-    entry.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
     entry.put("contracts", r.accountStats().size());
+    addMetadata(entry, r.metadata());
     if (r.rocksdbStatsAvailable()) {
       entry.put("blockDataCacheHit", r.blockDataCacheHit());
       entry.put("blockDataCacheMiss", r.blockDataCacheMiss());
@@ -198,6 +199,7 @@ public class WebUiServer {
     response.put("coldSloads", r.coldSloads());
     response.put("warmSloads", r.warmSloads());
     response.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
+    addMetadata(response, r.metadata());
     if (r.rocksdbStatsAvailable()) {
       response.put("blockDataCacheHit", r.blockDataCacheHit());
       response.put("blockDataCacheMiss", r.blockDataCacheMiss());
@@ -225,6 +227,17 @@ public class WebUiServer {
     }
     response.put("accounts", accounts);
     return response;
+  }
+
+  private static void addMetadata(final Map<String, Object> map, final BlockMetadata m) {
+    if (m == null) return;
+    map.put("executionTimeMs", m.executionTimeMs());
+    map.put("gasUsed", m.gasUsed());
+    map.put("gasLimit", m.gasLimit());
+    map.put("gasUsedPercent", Math.round(m.gasUsedPercent() * 10.0) / 10.0);
+    map.put("baseFeeGwei", Math.round(m.baseFeeGwei() * 1000.0) / 1000.0);
+    map.put("blobGasUsed", m.blobGasUsed());
+    map.put("blobTxCount", m.blobTxCount());
   }
 
   private long parseBlockParam(final RoutingContext ctx) {
