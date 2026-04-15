@@ -54,12 +54,17 @@ public class WebUiServer {
     router.get("/api/recent").handler(this::apiRecentBlocks);
     router.get("/api/status").handler(this::apiStatus);
 
-    server = vertx.createHttpServer()
-        .requestHandler(router)
-        .listen(port)
-        .onSuccess(s -> LOG.info("Cache analysis UI available at http://localhost:{}", s.actualPort()))
-        .onFailure(err -> LOG.error("Failed to start web UI server on port {}", port, err))
-        .result();
+    try {
+      server = vertx.createHttpServer()
+          .requestHandler(router)
+          .listen(port, "0.0.0.0")
+          .toCompletionStage()
+          .toCompletableFuture()
+          .get(10, java.util.concurrent.TimeUnit.SECONDS);
+      LOG.info("Cache analysis UI available at http://0.0.0.0:{}", server.actualPort());
+    } catch (Exception e) {
+      LOG.error("Failed to start web UI server on port {}", port, e);
+    }
   }
 
   public void stop() {
