@@ -1,0 +1,59 @@
+plugins {
+  id 'java'
+  id 'java-library'
+  id 'net.consensys.besu-plugin-distribution' version '0.1.6'
+}
+
+besuPlugin {
+  besuVersion = '26.2.0'
+}
+
+group = 'org.hyperledger.besu.plugin.cache'
+version = project.hasProperty('releaseVersion') ? project.getProperty('releaseVersion') : 'snapshot'
+
+sourceCompatibility = JavaVersion.VERSION_21
+targetCompatibility = JavaVersion.VERSION_21
+
+repositories {
+  mavenCentral()
+  mavenLocal()
+}
+
+dependencies {
+  annotationProcessor 'com.google.auto.service:auto-service'
+
+  compileOnly 'com.google.auto.service:auto-service-annotations'
+  compileOnly 'com.google.guava:guava'
+  compileOnly 'org.slf4j:slf4j-api'
+  compileOnly 'info.picocli:picocli'
+  compileOnly 'io.vertx:vertx-core'
+  compileOnly 'io.vertx:vertx-web'
+  compileOnly 'com.fasterxml.jackson.core:jackson-databind'
+  compileOnly 'com.fasterxml.jackson.core:jackson-annotations'
+}
+
+jar {
+  archiveBaseName = 'besu-cache-plugin'
+
+  manifest {
+    attributes(
+      'Specification-Title': archiveBaseName.get(),
+      'Specification-Version': rootProject.version,
+      'Implementation-Title': archiveBaseName.get(),
+      'Implementation-Version': rootProject.version
+    )
+  }
+
+  from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+  exclude 'META-INF/*.RSA', 'META-INF/*.SF', 'META-INF/*.DSA'
+  duplicatesStrategy(DuplicatesStrategy.INCLUDE)
+}
+
+tasks.withType(JavaCompile) {
+  options.encoding = 'UTF-8'
+}
+
+task plugin(dependsOn: 'jar') {
+  group 'build'
+  description 'Alias for the jar task'
+}

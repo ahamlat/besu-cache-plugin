@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Besu SLOAD Cache Analysis</title>
+<style>
+  :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3;
+          --muted: #8b949e; --accent: #58a6ff; --cold: #f85149; --warm: #3fb950; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--text); padding: 20px; }
+  h1 { font-size: 1.4em; margin-bottom: 16px; color: var(--accent); }
+  .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .controls input, .controls select, .controls button {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 12px; border-radius: 6px; font-size: 14px; }
+  .controls button { cursor: pointer; background: var(--accent); color: #000; font-weight: 600; border: none; }
+  .controls button:hover { opacity: 0.9; }
+  .controls button.toggle-on { background: var(--warm); }
+  .summary { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+               padding: 12px 20px; min-width: 140px; }
+  .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+  .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+  .stat-card .value.cold { color: var(--cold); }
+  .stat-card .value.warm { color: var(--warm); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { background: #1c2128; cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { color: var(--accent); }
+  th .arrow { font-size: 10px; margin-left: 4px; }
+  tr:hover td { background: rgba(88,166,255,0.05); }
+  .addr { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; }
+  .name { color: var(--accent); font-weight: 500; }
+  .pct-bar { display: inline-block; height: 8px; border-radius: 4px; min-width: 2px; }
+  .pct-bar.cold { background: var(--cold); }
+  .pct-bar.warm { background: var(--warm); }
+  .recent-table th, .recent-table td { font-size: 12px; padding: 6px 10px; }
+  .recent-table tr { cursor: pointer; }
+  .recent-table tr:hover td { background: rgba(88,166,255,0.1); }
+  .section-title { font-size: 1.1em; margin: 24px 0 10px 0; color: var(--muted); }
+  .slot-detail { background: #1c2128; padding: 8px 14px; font-family: monospace; font-size: 12px; }
+  .slot-detail td { border-bottom: 1px solid #252c35; }
+  .hidden { display: none; }
+  #status { font-size: 12px; color: var(--muted); margin-left: auto; }
+</style>
+</head>
+<body>
+<h1>Besu SLOAD Cache Analysis</h1>
+
+<div class="controls">
+  <input id="blockInput" type="text" placeholder="Block number or 'latest'" value="latest">
+  <button onclick="loadBlock()">Load</button>
+  <button id="autoBtn" onclick="toggleAuto()">Auto-refresh: OFF</button>
+  <select id="sortSelect" onchange="renderAccountTable()">
+    <option value="total">Sort by: Total</option>
+    <option value="cold">Sort by: Cold</option>
+    <option value="warm">Sort by: Warm</option>
+    <option value="coldPercent">Sort by: Cold %</option>
+    <option value="name">Sort by: Name</option>
+  </select>
+  <span id="status"></span>
+</div>
+
+<div class="summary" id="summaryCards"></div>
+
+<div id="accountSection" class="hidden">
+  <div class="section-title">Per-Contract Breakdown</div>
+  <table id="accountTable">
+    <thead><tr id="accountHeader"></tr></thead>
+    <tbody id="accountBody"></tbody>
+  </table>
+</div>
+
+<div class="section-title">Recent Blocks</div>
+<table class="recent-table">
+  <thead>
+    <tr><th>Block</th><th>Txs</th><th>SLOADs</th><th>Cold</th><th>Warm</th><th>Cold%</th><th>Contracts</th></tr>
+  </thead>
+  <tbody id="recentBody"></tbody>
+</table>
+
+<script>
+let currentData = null;
+let autoRefresh = false;
+let autoTimer = null;
+let sortCol = 'total';
+let sortAsc = false;
+
+async function fetchJson(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function loadBlock() {
+  const val = document.getElementById('blockInput').value.trim() || 'latest';
+  try {
+    const data = await fetchJson('/api/block/' + val);
+    if (data.error) { alert(data.error); return; }
+    currentData = data;
+    renderSummary(data);
+    renderAccountTable();
+    document.getElementById('accountSection').classList.remove('hidden');
+  } catch(e) { console.error(e); }
+  loadRecent();
+  loadStatus();
+}
+
+function renderSummary(d) {
+  document.getElementById('summaryCards').innerHTML = `
+    <div class="stat-card"><div class="label">Block</div><div class="value">${d.blockNumber}</div></div>
+    <div class="stat-card"><div class="label">Transactions</div><div class="value">${d.transactionCount}</div></div>
+    <div class="stat-card"><div class="label">Total SLOADs</div><div class="value">${d.totalSloads}</div></div>
+    <div class="stat-card"><div class="label">Cold reads</div><div class="value cold">${d.coldSloads}</div></div>
+    <div class="stat-card"><div class="label">Warm reads</div><div class="value warm">${d.warmSloads}</div></div>
+    <div class="stat-card"><div class="label">Cold ratio</div><div class="value cold">${d.coldPercent}%</div></div>
+    <div class="stat-card"><div class="label">Contracts</div><div class="value">${d.accounts.length}</div></div>
+  `;
+}
+
+const columns = [
+  {key:'address', label:'Contract', sortable:true},
+  {key:'contractName', label:'Name', sortable:true},
+  {key:'total', label:'Total', sortable:true},
+  {key:'cold', label:'Cold', sortable:true},
+  {key:'warm', label:'Warm', sortable:true},
+  {key:'coldPercent', label:'Cold %', sortable:true},
+  {key:'warmPercent', label:'Warm %', sortable:true},
+  {key:'bar', label:'', sortable:false}
+];
+
+function renderAccountTable() {
+  if (!currentData) return;
+  sortCol = document.getElementById('sortSelect').value;
+
+  let accounts = [...currentData.accounts];
+  accounts.sort((a,b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (sortCol === 'name' || sortCol === 'address' || sortCol === 'contractName') {
+      return (va||'').localeCompare(vb||'');
+    }
+    return (vb||0) - (va||0);
+  });
+
+  const header = document.getElementById('accountHeader');
+  header.innerHTML = columns.map(c =>
+    `<th onclick="setSortCol('${c.key}')">${c.label}</th>`
+  ).join('');
+
+  const body = document.getElementById('accountBody');
+  body.innerHTML = accounts.map(a => `
+    <tr onclick="toggleSlots(this, '${a.address}')">
+      <td class="addr">${a.address}</td>
+      <td class="name">${a.contractName || ''}</td>
+      <td>${a.total}</td>
+      <td style="color:var(--cold)">${a.cold}</td>
+      <td style="color:var(--warm)">${a.warm}</td>
+      <td>${a.coldPercent}%</td>
+      <td>${a.warmPercent}%</td>
+      <td>
+        <span class="pct-bar cold" style="width:${a.coldPercent * 0.8}px"></span>
+        <span class="pct-bar warm" style="width:${a.warmPercent * 0.8}px"></span>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function setSortCol(col) {
+  document.getElementById('sortSelect').value = col;
+  renderAccountTable();
+}
+
+async function toggleSlots(row, address) {
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains('slot-detail')) {
+    next.remove();
+    return;
+  }
+  const data = await fetchJson('/api/block/' + currentData.blockNumber + '/sloads?address=' + address);
+  if (!data.sloads || data.sloads.length === 0) return;
+
+  const detail = document.createElement('tr');
+  detail.className = 'slot-detail';
+  detail.innerHTML = '<td colspan="8"><table style="width:100%"><thead><tr><th>Slot</th><th>Cold/Warm</th><th>Tx#</th></tr></thead><tbody>' +
+    data.sloads.map(s => `<tr><td class="addr">${s.slot}</td><td style="color:var(${s.cold?'--cold':'--warm'})">${s.cold?'COLD':'WARM'}</td><td>${s.txIndex}</td></tr>`).join('') +
+    '</tbody></table></td>';
+  row.after(detail);
+}
+
+async function loadRecent() {
+  try {
+    const data = await fetchJson('/api/recent?count=30');
+    const body = document.getElementById('recentBody');
+    body.innerHTML = data.map(b => `
+      <tr onclick="document.getElementById('blockInput').value=${b.blockNumber};loadBlock()">
+        <td>${b.blockNumber}</td><td>${b.txCount}</td><td>${b.totalSloads}</td>
+        <td style="color:var(--cold)">${b.coldSloads}</td>
+        <td style="color:var(--warm)">${b.warmSloads}</td>
+        <td>${b.coldPercent}%</td><td>${b.contracts}</td>
+      </tr>
+    `).join('');
+  } catch(e) {}
+}
+
+async function loadStatus() {
+  try {
+    const s = await fetchJson('/api/status');
+    document.getElementById('status').textContent =
+      `Blocks stored: ${s.blocksStored} | Names cached: ${s.contractNamesCached} | Pending: ${s.pendingNameResolutions}`;
+  } catch(e) {}
+}
+
+function toggleAuto() {
+  autoRefresh = !autoRefresh;
+  const btn = document.getElementById('autoBtn');
+  if (autoRefresh) {
+    btn.textContent = 'Auto-refresh: ON';
+    btn.classList.add('toggle-on');
+    autoTimer = setInterval(() => {
+      document.getElementById('blockInput').value = 'latest';
+      loadBlock();
+    }, 6000);
+  } else {
+    btn.textContent = 'Auto-refresh: OFF';
+    btn.classList.remove('toggle-on');
+    clearInterval(autoTimer);
+  }
+}
+
+loadBlock();
+loadRecent();
+loadStatus();
+</script>
+</body>
+</html>
