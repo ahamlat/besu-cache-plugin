@@ -1,12 +1,27 @@
 package org.hyperledger.besu.plugin.cache.analyzer;
 
+import org.hyperledger.besu.plugin.cache.rocksdb.RocksDBStatsProvider;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Complete SLOAD analysis for a single block, including RocksDB cache statistics. */
+/**
+ * Complete SLOAD analysis for a single block.
+ *
+ * <p>Per-SLOAD classification (storageReads / notFound / cached) is based on
+ * tracking unique slot accesses within the block:
+ * <ul>
+ *   <li>STORAGE_READ — first read of a slot in this block, non-zero value returned</li>
+ *   <li>NOT_FOUND — first read of a slot in this block, value is zero</li>
+ *   <li>CACHED — slot was already read earlier in this block (accumulator cache)</li>
+ * </ul>
+ *
+ * <p>Block-level RocksDB stats (blockDataCacheHit, blockDataCacheMiss, blockMemtableHit)
+ * are aggregate ticker deltas across the entire block execution.
+ */
 public record BlockAnalysisResult(
     long blockNumber,
     String blockHash,
@@ -17,22 +32,19 @@ public record BlockAnalysisResult(
     int coldSloads,
     int warmSloads,
     List<AccountStats> accountStats,
-    int cacheHits,
-    int cacheMisses,
-    int memtableHits,
+    int storageReads,
     int notFound,
-    int accumulatorHits,
+    int cached,
+    long blockDataCacheHit,
+    long blockDataCacheMiss,
+    long blockMemtableHit,
     boolean rocksdbStatsAvailable) {
 
   public double coldPercent() {
     return totalSloads > 0 ? coldSloads * 100.0 / totalSloads : 0;
   }
 
-  public double cacheHitPercent() {
-    return totalSloads > 0 ? cacheHits * 100.0 / totalSloads : 0;
-  }
-
-  /** Build aggregated account stats from raw SLOAD records. */
+  /** Build from raw SLOAD records and block-level RocksDB deltas. */
   public static BlockAnalysisResult build(
       final long blockNumber,
       final String blockHash,
@@ -40,24 +52,23 @@ public record BlockAnalysisResult(
       final int transactionCount,
       final List<SloadRecord> sloads,
       final java.util.function.Function<String, String> nameResolver,
-      final boolean rocksdbStatsAvailable) {
+      final boolean rocksdbStatsAvailable,
+      final RocksDBStatsProvider.Snapshot blockDelta) {
 
     int cold = 0, warm = 0;
-    int totalHit = 0, totalMiss = 0, totalMem = 0, totalNf = 0, totalAcc = 0;
-    // perAccount: [cold, warm, cacheHit, cacheMiss, memtable, notFound, accumulator]
+    int totalStorageRead = 0, totalNotFound = 0, totalCached = 0;
+    // perAccount: [cold, warm, storageRead, notFound, cached]
     Map<String, int[]> perAccount = new LinkedHashMap<>();
 
     for (SloadRecord r : sloads) {
       String addr = r.contractAddress().toHexString().toLowerCase();
-      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[7]);
+      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[5]);
       if (r.isCold()) { cold++; counts[0]++; } else { warm++; counts[1]++; }
 
       switch (r.storageType()) {
-        case "HIT" -> { totalHit++; counts[2]++; }
-        case "MISS" -> { totalMiss++; counts[3]++; }
-        case "MEMTABLE" -> { totalMem++; counts[4]++; }
-        case "NOT_FOUND" -> { totalNf++; counts[5]++; }
-        default -> { totalAcc++; counts[6]++; }
+        case "STORAGE_READ" -> { totalStorageRead++; counts[2]++; }
+        case "NOT_FOUND" -> { totalNotFound++; counts[3]++; }
+        default -> { totalCached++; counts[4]++; }
       }
     }
 
@@ -69,7 +80,7 @@ public record BlockAnalysisResult(
           entry.getKey(),
           name != null ? name : "",
           c[0] + c[1], c[0], c[1],
-          c[2], c[3], c[4], c[5], c[6]));
+          c[2], c[3], c[4]));
     }
     stats.sort(Comparator.comparingInt(AccountStats::totalReads).reversed());
 
@@ -77,7 +88,8 @@ public record BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
         List.copyOf(sloads), sloads.size(), cold, warm,
         List.copyOf(stats),
-        totalHit, totalMiss, totalMem, totalNf, totalAcc,
+        totalStorageRead, totalNotFound, totalCached,
+        blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit(),
         rocksdbStatsAvailable);
   }
 }

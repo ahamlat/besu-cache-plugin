@@ -145,22 +145,7 @@ public class WebUiServer {
 
     List<Map<String, Object>> blocks = new ArrayList<>();
     for (BlockAnalysisResult r : store.getRecent(count)) {
-      Map<String, Object> entry = new LinkedHashMap<>();
-      entry.put("blockNumber", r.blockNumber());
-      entry.put("totalSloads", r.totalSloads());
-      entry.put("coldSloads", r.coldSloads());
-      entry.put("warmSloads", r.warmSloads());
-      entry.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
-      entry.put("cacheHits", r.cacheHits());
-      entry.put("cacheMisses", r.cacheMisses());
-      entry.put("memtableHits", r.memtableHits());
-      entry.put("notFound", r.notFound());
-      entry.put("accumulatorHits", r.accumulatorHits());
-      entry.put("cacheHitPercent", Math.round(r.cacheHitPercent() * 10.0) / 10.0);
-      entry.put("contracts", r.accountStats().size());
-      entry.put("txCount", r.transactionCount());
-      entry.put("rocksdbStats", r.rocksdbStatsAvailable());
-      blocks.add(entry);
+      blocks.add(serializeBlockSummary(r));
     }
     jsonResponse(ctx, 200, blocks);
   }
@@ -179,6 +164,27 @@ public class WebUiServer {
     jsonResponse(ctx, 200, status);
   }
 
+  private Map<String, Object> serializeBlockSummary(final BlockAnalysisResult r) {
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("blockNumber", r.blockNumber());
+    entry.put("txCount", r.transactionCount());
+    entry.put("totalSloads", r.totalSloads());
+    entry.put("storageReads", r.storageReads());
+    entry.put("notFound", r.notFound());
+    entry.put("cached", r.cached());
+    entry.put("coldSloads", r.coldSloads());
+    entry.put("warmSloads", r.warmSloads());
+    entry.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
+    entry.put("contracts", r.accountStats().size());
+    if (r.rocksdbStatsAvailable()) {
+      entry.put("blockDataCacheHit", r.blockDataCacheHit());
+      entry.put("blockDataCacheMiss", r.blockDataCacheMiss());
+      entry.put("blockMemtableHit", r.blockMemtableHit());
+    }
+    entry.put("rocksdbStats", r.rocksdbStatsAvailable());
+    return entry;
+  }
+
   private Map<String, Object> serializeBlock(final BlockAnalysisResult r) {
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("blockNumber", r.blockNumber());
@@ -186,15 +192,17 @@ public class WebUiServer {
     response.put("timestamp", r.timestamp());
     response.put("transactionCount", r.transactionCount());
     response.put("totalSloads", r.totalSloads());
+    response.put("storageReads", r.storageReads());
+    response.put("notFound", r.notFound());
+    response.put("cached", r.cached());
     response.put("coldSloads", r.coldSloads());
     response.put("warmSloads", r.warmSloads());
     response.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
-    response.put("cacheHits", r.cacheHits());
-    response.put("cacheMisses", r.cacheMisses());
-    response.put("memtableHits", r.memtableHits());
-    response.put("notFound", r.notFound());
-    response.put("accumulatorHits", r.accumulatorHits());
-    response.put("cacheHitPercent", Math.round(r.cacheHitPercent() * 10.0) / 10.0);
+    if (r.rocksdbStatsAvailable()) {
+      response.put("blockDataCacheHit", r.blockDataCacheHit());
+      response.put("blockDataCacheMiss", r.blockDataCacheMiss());
+      response.put("blockMemtableHit", r.blockMemtableHit());
+    }
     response.put("rocksdbStats", r.rocksdbStatsAvailable());
 
     List<Map<String, Object>> accounts = new ArrayList<>();
@@ -203,18 +211,16 @@ public class WebUiServer {
       acc.put("address", a.address());
       acc.put("contractName", a.contractName());
       acc.put("total", a.totalReads());
+      acc.put("storageReads", a.storageReads());
+      acc.put("notFound", a.notFound());
+      acc.put("cached", a.cached());
+      acc.put("storageReadPercent", Math.round(a.storageReadPercent() * 10.0) / 10.0);
+      acc.put("notFoundPercent", Math.round(a.notFoundPercent() * 10.0) / 10.0);
+      acc.put("cachedPercent", Math.round(a.cachedPercent() * 10.0) / 10.0);
       acc.put("cold", a.coldReads());
       acc.put("warm", a.warmReads());
       acc.put("coldPercent", Math.round(a.coldPercent() * 10.0) / 10.0);
       acc.put("warmPercent", Math.round(a.warmPercent() * 10.0) / 10.0);
-      acc.put("cacheHits", a.cacheHits());
-      acc.put("cacheMisses", a.cacheMisses());
-      acc.put("memtableHits", a.memtableHits());
-      acc.put("notFound", a.notFound());
-      acc.put("accumulatorHits", a.accumulatorHits());
-      acc.put("cacheHitPercent", Math.round(a.cacheHitPercent() * 10.0) / 10.0);
-      acc.put("cacheMissPercent", Math.round(a.cacheMissPercent() * 10.0) / 10.0);
-      acc.put("notFoundPercent", Math.round(a.notFoundPercent() * 10.0) / 10.0);
       accounts.add(acc);
     }
     response.put("accounts", accounts);

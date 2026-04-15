@@ -17,7 +17,9 @@ import org.hyperledger.besu.plugin.data.ProcessableBlockHeader;
 import org.hyperledger.besu.plugin.services.tracer.BlockAwareOperationTracer;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -28,8 +30,17 @@ import org.slf4j.LoggerFactory;
  * Captures every SLOAD during block execution and classifies each as:
  * <ul>
  *   <li>EVM-level: warm/cold (based on gas cost, EIP-2929)</li>
- *   <li>RocksDB-level: HIT/MISS/MEMTABLE/ACCUMULATOR (based on ticker deltas)</li>
+ *   <li>Storage-level:
+ *     <ul>
+ *       <li>CACHED — slot already read earlier in this block (served from accumulator)</li>
+ *       <li>NOT_FOUND — first read in block, value is zero (slot empty/doesn't exist)</li>
+ *       <li>STORAGE_READ — first read in block, non-zero value (fetched from storage)</li>
+ *     </ul>
+ *   </li>
  * </ul>
+ *
+ * Block-level RocksDB ticker deltas (HIT/MISS/MEMTABLE) are captured
+ * between traceStartBlock and traceEndBlock for aggregate statistics.
  */
 public class SloadTracer implements BlockAwareOperationTracer {
 
@@ -47,9 +58,16 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private int txIndex = -1;
   private final List<SloadRecord> sloads = new ArrayList<>();
 
+  /**
+   * Tracks (address + slot) pairs already read in this block.
+   * If a slot was already read, the accumulator serves it from memory.
+   */
+  private final Set<SlotKey> seenSlots = new HashSet<>();
+
   private Address pendingAddress;
   private UInt256 pendingSlot;
-  private RocksDBStatsProvider.Snapshot preSnapshot;
+
+  private RocksDBStatsProvider.Snapshot blockStartSnapshot;
 
   public SloadTracer(
       final BlockResultStore store,
@@ -80,14 +98,15 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   private void resetBlock(final long blockNum, final String blockHash, final long timestamp) {
     sloads.clear();
+    seenSlots.clear();
     txIndex = -1;
     pendingAddress = null;
     pendingSlot = null;
-    preSnapshot = null;
     currentBlockNumber = blockNum;
     currentBlockHash = blockHash;
     currentBlockTimestamp = timestamp;
     currentTxCount = 0;
+    blockStartSnapshot = statsProvider.snapshot();
   }
 
   @Override
@@ -102,7 +121,6 @@ public class SloadTracer implements BlockAwareOperationTracer {
       pendingAddress = frame.getRecipientAddress();
       Bytes raw = frame.getStackItem(0);
       pendingSlot = UInt256.fromBytes(raw);
-      preSnapshot = statsProvider.snapshot();
     }
   }
 
@@ -112,13 +130,15 @@ public class SloadTracer implements BlockAwareOperationTracer {
       long gasCost = operationResult.getGasCost();
       boolean isCold = gasCost > 200;
 
+      SlotKey key = new SlotKey(pendingAddress, pendingSlot);
       String storageType;
-      if (statsProvider.isAvailable() && preSnapshot != null) {
-        RocksDBStatsProvider.Snapshot postSnapshot = statsProvider.snapshot();
-        RocksDBStatsProvider.Snapshot delta = postSnapshot.delta(preSnapshot);
-        storageType = delta.classify();
+
+      if (!seenSlots.add(key)) {
+        storageType = "CACHED";
       } else {
-        storageType = isCold ? "MISS" : "HIT";
+        Bytes loadedValue = frame.getStackItem(0);
+        boolean isZero = loadedValue.isZero();
+        storageType = isZero ? "NOT_FOUND" : "STORAGE_READ";
       }
 
       sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType));
@@ -126,7 +146,6 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
       pendingAddress = null;
       pendingSlot = null;
-      preSnapshot = null;
     }
   }
 
@@ -135,6 +154,10 @@ public class SloadTracer implements BlockAwareOperationTracer {
     if (currentBlockHash.isEmpty()) {
       currentBlockHash = blockHeader.getBlockHash().toHexString();
     }
+
+    RocksDBStatsProvider.Snapshot blockEndSnapshot = statsProvider.snapshot();
+    RocksDBStatsProvider.Snapshot blockDelta = blockEndSnapshot.delta(blockStartSnapshot);
+
     BlockAnalysisResult result = BlockAnalysisResult.build(
         currentBlockNumber,
         currentBlockHash,
@@ -142,14 +165,21 @@ public class SloadTracer implements BlockAwareOperationTracer {
         currentTxCount,
         sloads,
         addr -> nameResolver.getName(addr),
-        statsProvider.isAvailable());
+        statsProvider.isAvailable(),
+        blockDelta);
 
     store.store(result);
     LOG.info("Block {} analyzed: {} SLOADs ({} cold, {} warm | "
-            + "{} HIT, {} MISS, {} MEM, {} NOTFOUND, {} ACC) across {} contracts",
+            + "{} STORAGE_READ, {} NOT_FOUND, {} CACHED) across {} contracts "
+            + "[RocksDB block: {} data-hit, {} data-miss, {} memtable]",
         currentBlockNumber, result.totalSloads(), result.coldSloads(), result.warmSloads(),
-        result.cacheHits(), result.cacheMisses(), result.memtableHits(),
-        result.notFound(), result.accumulatorHits(),
-        result.accountStats().size());
+        result.storageReads(), result.notFound(), result.cached(),
+        result.accountStats().size(),
+        blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit());
   }
+
+  /**
+   * Composite key for tracking unique (address, slot) pairs within a block.
+   */
+  private record SlotKey(Address address, UInt256 slot) {}
 }

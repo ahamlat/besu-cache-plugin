@@ -7,11 +7,9 @@ public record AccountStats(
     int totalReads,
     int coldReads,
     int warmReads,
-    int cacheHits,
-    int cacheMisses,
-    int memtableHits,
+    int storageReads,
     int notFound,
-    int accumulatorHits) {
+    int cached) {
 
   public double coldPercent() {
     return totalReads > 0 ? coldReads * 100.0 / totalReads : 0;
@@ -21,15 +19,15 @@ public record AccountStats(
     return totalReads > 0 ? warmReads * 100.0 / totalReads : 0;
   }
 
-  public double cacheHitPercent() {
-    return totalReads > 0 ? cacheHits * 100.0 / totalReads : 0;
-  }
-
-  public double cacheMissPercent() {
-    return totalReads > 0 ? cacheMisses * 100.0 / totalReads : 0;
+  public double storageReadPercent() {
+    return totalReads > 0 ? storageReads * 100.0 / totalReads : 0;
   }
 
   public double notFoundPercent() {
     return totalReads > 0 ? notFound * 100.0 / totalReads : 0;
+  }
+
+  public double cachedPercent() {
+    return totalReads > 0 ? cached * 100.0 / totalReads : 0;
   }
 }

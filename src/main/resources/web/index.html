@@ -7,7 +7,8 @@
 <style>
   :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3;
           --muted: #8b949e; --accent: #58a6ff; --cold: #f85149; --warm: #3fb950;
-          --hit: #3fb950; --miss: #f85149; --mem: #d29922; --nf: #f0883e; --acc: #8b949e; }
+          --read: #58a6ff; --nf: #f0883e; --cached: #8b949e;
+          --hit: #3fb950; --miss: #f85149; --mem: #d29922; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
          background: var(--bg); color: var(--text); padding: 20px; }
@@ -24,6 +25,7 @@
                padding: 10px 16px; min-width: 120px; }
   .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
   .stat-card .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  .stat-card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
   table { width: 100%; border-collapse: collapse; background: var(--surface);
           border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -44,11 +46,9 @@
   #status { font-size: 11px; color: var(--muted); margin-left: auto; }
   .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px;
            font-weight: 600; text-transform: uppercase; }
-  .badge.hit { background: rgba(63,185,80,0.2); color: var(--hit); }
-  .badge.miss { background: rgba(248,81,73,0.2); color: var(--miss); }
-  .badge.mem { background: rgba(210,153,34,0.2); color: var(--mem); }
+  .badge.read { background: rgba(88,166,255,0.2); color: var(--read); }
   .badge.nf { background: rgba(240,136,62,0.2); color: var(--nf); }
-  .badge.acc { background: rgba(139,148,158,0.2); color: var(--acc); }
+  .badge.cached { background: rgba(139,148,158,0.2); color: var(--cached); }
   .badge.cold { background: rgba(248,81,73,0.2); color: var(--cold); }
   .badge.warm { background: rgba(63,185,80,0.2); color: var(--warm); }
 </style>
@@ -62,14 +62,12 @@
   <button id="autoBtn" onclick="toggleAuto()">Auto-refresh: OFF</button>
   <select id="sortSelect" onchange="sortCol=this.value;renderAccountTable()">
     <option value="total">Sort by: Total</option>
+    <option value="storageReads">Sort by: Storage Reads</option>
     <option value="notFound">Sort by: Not Found</option>
-    <option value="cacheMisses">Sort by: Misses</option>
-    <option value="cacheHits">Sort by: Hits</option>
-    <option value="memtableHits">Sort by: Memtable</option>
-    <option value="accumulatorHits">Sort by: Accumulator</option>
-    <option value="notFoundPercent">Sort by: Not Found %</option>
-    <option value="cacheMissPercent">Sort by: Miss %</option>
-    <option value="cacheHitPercent">Sort by: Hit %</option>
+    <option value="cached">Sort by: Cached</option>
+    <option value="notFoundPercent">Sort by: NF %</option>
+    <option value="storageReadPercent">Sort by: Read %</option>
+    <option value="cachedPercent">Sort by: Cached %</option>
     <option value="cold">Sort by: Cold</option>
     <option value="warm">Sort by: Warm</option>
     <option value="coldPercent">Sort by: Cold %</option>
@@ -92,7 +90,7 @@
 <table class="recent-table" id="recentTable">
   <thead>
     <tr><th>Block</th><th>Txs</th><th>SLOADs</th>
-        <th>HIT</th><th>MISS</th><th>NOTFND</th><th>MEM</th><th>ACC</th>
+        <th>Read</th><th>NotFnd</th><th>Cached</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
   <tbody id="recentBody"></tbody>
@@ -123,58 +121,64 @@ async function loadBlock() {
   loadStatus();
 }
 
+function pct(n, total) {
+  return total > 0 ? Math.round(n * 1000 / total) / 10 : 0;
+}
+
 function renderSummary(d) {
-  const hasRocksdb = d.rocksdbStats;
+  const hasRdb = d.rocksdbStats;
+  const firstReadCount = d.storageReads + d.notFound;
   let cards = `
     <div class="stat-card"><div class="label">Block</div><div class="value">${d.blockNumber}</div></div>
     <div class="stat-card"><div class="label">Transactions</div><div class="value">${d.transactionCount}</div></div>
-    <div class="stat-card"><div class="label">Total SLOADs</div><div class="value">${d.totalSloads}</div></div>`;
-
-  if (hasRocksdb) {
-    cards += `
-    <div class="stat-card"><div class="label">Cache HIT</div><div class="value" style="color:var(--hit)">${d.cacheHits}</div></div>
-    <div class="stat-card"><div class="label">Cache MISS</div><div class="value" style="color:var(--miss)">${d.cacheMisses}</div></div>
-    <div class="stat-card"><div class="label">NOT FOUND</div><div class="value" style="color:var(--nf)">${d.notFound}</div></div>
-    <div class="stat-card"><div class="label">Memtable</div><div class="value" style="color:var(--mem)">${d.memtableHits}</div></div>
-    <div class="stat-card"><div class="label">Accumulator</div><div class="value" style="color:var(--acc)">${d.accumulatorHits}</div></div>
-    <div class="stat-card"><div class="label">Hit Ratio</div><div class="value" style="color:var(--hit)">${d.cacheHitPercent}%</div></div>`;
-  }
-
-  cards += `
+    <div class="stat-card"><div class="label">Total SLOADs</div><div class="value">${d.totalSloads}</div>
+      <div class="sub">${firstReadCount} unique slots</div></div>
+    <div class="stat-card"><div class="label">Storage Read</div><div class="value" style="color:var(--read)">${d.storageReads}</div>
+      <div class="sub">1st read, value found</div></div>
+    <div class="stat-card"><div class="label">Not Found</div><div class="value" style="color:var(--nf)">${d.notFound}</div>
+      <div class="sub">1st read, slot empty</div></div>
+    <div class="stat-card"><div class="label">Cached</div><div class="value" style="color:var(--cached)">${d.cached}</div>
+      <div class="sub">repeat read in block</div></div>
     <div class="stat-card"><div class="label">Cold (EVM)</div><div class="value" style="color:var(--cold)">${d.coldSloads}</div></div>
     <div class="stat-card"><div class="label">Warm (EVM)</div><div class="value" style="color:var(--warm)">${d.warmSloads}</div></div>
     <div class="stat-card"><div class="label">Contracts</div><div class="value">${d.accounts.length}</div></div>`;
 
+  if (hasRdb) {
+    cards += `
+    <div class="stat-card" style="border-color:#30363d">
+      <div class="label">RocksDB Block Stats</div>
+      <div class="sub" style="margin-top:4px">
+        <span style="color:var(--hit)">Data Hit: ${d.blockDataCacheHit}</span> &nbsp;
+        <span style="color:var(--miss)">Data Miss: ${d.blockDataCacheMiss}</span> &nbsp;
+        <span style="color:var(--mem)">Memtable: ${d.blockMemtableHit}</span>
+      </div>
+    </div>`;
+  }
+
   document.getElementById('summaryCards').innerHTML = cards;
 }
 
-function colDefs(hasRocksdb) {
-  const cols = [
+function colDefs() {
+  return [
     {key:'address', label:'Contract', type:'string'},
     {key:'contractName', label:'Name', type:'string'},
     {key:'total', label:'Total', type:'number'},
+    {key:'storageReads', label:'Read', type:'number', color:'var(--read)'},
+    {key:'notFound', label:'NotFnd', type:'number', color:'var(--nf)'},
+    {key:'cached', label:'Cached', type:'number', color:'var(--cached)'},
+    {key:'storageReadPercent', label:'Read %', type:'number'},
+    {key:'notFoundPercent', label:'NF %', type:'number'},
+    {key:'cachedPercent', label:'Cch %', type:'number'},
+    {key:'cold', label:'Cold', type:'number', color:'var(--cold)'},
+    {key:'warm', label:'Warm', type:'number', color:'var(--warm)'},
+    {key:'coldPercent', label:'Cold %', type:'number'},
+    {key:'bar', label:'', type:'bar'}
   ];
-  if (hasRocksdb) {
-    cols.push({key:'cacheHits', label:'HIT', type:'number', color:'var(--hit)'});
-    cols.push({key:'cacheMisses', label:'MISS', type:'number', color:'var(--miss)'});
-    cols.push({key:'notFound', label:'NOTFND', type:'number', color:'var(--nf)'});
-    cols.push({key:'memtableHits', label:'MEM', type:'number', color:'var(--mem)'});
-    cols.push({key:'accumulatorHits', label:'ACC', type:'number', color:'var(--acc)'});
-    cols.push({key:'cacheHitPercent', label:'Hit %', type:'number'});
-    cols.push({key:'cacheMissPercent', label:'Miss %', type:'number'});
-    cols.push({key:'notFoundPercent', label:'NF %', type:'number'});
-  }
-  cols.push({key:'cold', label:'Cold', type:'number', color:'var(--cold)'});
-  cols.push({key:'warm', label:'Warm', type:'number', color:'var(--warm)'});
-  cols.push({key:'coldPercent', label:'Cold %', type:'number'});
-  cols.push({key:'bar', label:'', type:'bar'});
-  return cols;
 }
 
 function renderAccountTable() {
   if (!currentData) return;
-  const hasRocksdb = currentData.rocksdbStats;
-  const cols = colDefs(hasRocksdb);
+  const cols = colDefs();
 
   let accounts = [...currentData.accounts];
   accounts.sort((a,b) => {
@@ -203,21 +207,14 @@ function renderAccountTable() {
     for (let i = 3; i < cols.length; i++) {
       const c = cols[i];
       if (c.type === 'bar') {
-        if (hasRocksdb) {
-          const hitW = Math.max(1, (a.cacheHitPercent||0) * 0.6);
-          const missW = Math.max(1, (a.cacheMissPercent||0) * 0.6);
-          const nfW = Math.max(1, (a.notFoundPercent||0) * 0.6);
-          row += `<td>
-            <span class="pct-bar" style="background:var(--hit);width:${hitW}px"></span>
-            <span class="pct-bar" style="background:var(--miss);width:${missW}px"></span>
-            <span class="pct-bar" style="background:var(--nf);width:${nfW}px"></span>
-          </td>`;
-        } else {
-          row += `<td>
-            <span class="pct-bar" style="background:var(--cold);width:${(a.coldPercent||0)*0.6}px"></span>
-            <span class="pct-bar" style="background:var(--warm);width:${(a.warmPercent||0)*0.6}px"></span>
-          </td>`;
-        }
+        const rdW = Math.max(1, (a.storageReadPercent||0) * 0.6);
+        const nfW = Math.max(1, (a.notFoundPercent||0) * 0.6);
+        const ccW = Math.max(1, (a.cachedPercent||0) * 0.6);
+        row += `<td>
+          <span class="pct-bar" style="background:var(--read);width:${rdW}px"></span>
+          <span class="pct-bar" style="background:var(--nf);width:${nfW}px"></span>
+          <span class="pct-bar" style="background:var(--cached);width:${ccW}px"></span>
+        </td>`;
       } else {
         const val = a[c.key];
         const disp = typeof val === 'number' && c.label.includes('%') ? val + '%' : (val ?? '');
@@ -248,19 +245,18 @@ async function toggleSlots(row, address) {
   const data = await fetchJson('/api/block/' + currentData.blockNumber + '/sloads?address=' + address);
   if (!data.sloads || data.sloads.length === 0) return;
 
-  const hasRocksdb = currentData.rocksdbStats;
   const totalCols = document.querySelectorAll('#accountHeader th').length;
-  let innerCols = '<th>Slot</th><th>Storage</th><th>EVM</th><th>Tx#</th>';
 
   const detail = document.createElement('tr');
   detail.className = 'slot-detail';
-  detail.innerHTML = `<td colspan="${totalCols}"><table style="width:100%"><thead><tr>${innerCols}</tr></thead><tbody>` +
-    data.sloads.map(s => {
+  detail.innerHTML = `<td colspan="${totalCols}"><table style="width:100%">
+    <thead><tr><th>#</th><th>Slot</th><th>Storage</th><th>EVM</th><th>Tx#</th></tr></thead><tbody>` +
+    data.sloads.map((s, i) => {
       const st = s.storageType || 'UNKNOWN';
-      const stClass = st === 'HIT' ? 'hit' : st === 'MISS' ? 'miss' :
-                       st === 'NOT_FOUND' ? 'nf' : st === 'MEMTABLE' ? 'mem' : 'acc';
+      const stClass = st === 'STORAGE_READ' ? 'read' : st === 'NOT_FOUND' ? 'nf' : 'cached';
       const evmClass = s.cold ? 'cold' : 'warm';
       return `<tr>
+        <td style="color:var(--muted)">${i+1}</td>
         <td class="addr">${s.slot}</td>
         <td><span class="badge ${stClass}">${st}</span></td>
         <td><span class="badge ${evmClass}">${s.cold?'COLD':'WARM'}</span></td>
@@ -278,11 +274,9 @@ async function loadRecent() {
     body.innerHTML = data.map(b => `
       <tr onclick="document.getElementById('blockInput').value=${b.blockNumber};loadBlock()">
         <td>${b.blockNumber}</td><td>${b.txCount}</td><td>${b.totalSloads}</td>
-        <td style="color:var(--hit)">${b.cacheHits||0}</td>
-        <td style="color:var(--miss)">${b.cacheMisses||0}</td>
-        <td style="color:var(--nf)">${b.notFound||0}</td>
-        <td style="color:var(--mem)">${b.memtableHits||0}</td>
-        <td style="color:var(--acc)">${b.accumulatorHits||0}</td>
+        <td style="color:var(--read)">${b.storageReads}</td>
+        <td style="color:var(--nf)">${b.notFound}</td>
+        <td style="color:var(--cached)">${b.cached}</td>
         <td style="color:var(--cold)">${b.coldSloads}</td>
         <td style="color:var(--warm)">${b.warmSloads}</td>
         <td>${b.contracts}</td>
