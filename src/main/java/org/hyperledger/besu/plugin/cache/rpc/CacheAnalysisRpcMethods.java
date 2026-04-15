@@ -180,7 +180,9 @@ public class CacheAnalysisRpcMethods {
 
   private static void addMetadata(final Map<String, Object> map, final BlockMetadata m) {
     if (m == null) return;
-    map.put("executionTimeMs", m.executionTimeMs());
+    map.put("evmExecutionMs", m.evmExecutionMs());
+    map.put("stateRootMs", m.stateRootMs());
+    map.put("totalBlockMs", m.totalBlockMs());
     map.put("gasUsed", m.gasUsed());
     map.put("gasLimit", m.gasLimit());
     map.put("gasUsedPercent", Math.round(m.gasUsedPercent() * 10.0) / 10.0);

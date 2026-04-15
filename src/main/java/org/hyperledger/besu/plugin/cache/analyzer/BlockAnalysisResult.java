@@ -35,6 +35,16 @@ public record BlockAnalysisResult(
     return totalSloads > 0 ? coldSloads * 100.0 / totalSloads : 0;
   }
 
+  /** Return a copy with updated metadata (used for post-listener timing update). */
+  public BlockAnalysisResult withMetadata(final BlockMetadata newMetadata) {
+    return new BlockAnalysisResult(
+        blockNumber, blockHash, timestamp, transactionCount,
+        sloads, totalSloads, coldSloads, warmSloads, accountStats,
+        storageReads, notFound, cached,
+        blockDataCacheHit, blockDataCacheMiss, blockMemtableHit,
+        rocksdbStatsAvailable, newMetadata);
+  }
+
   public static BlockAnalysisResult build(
       final long blockNumber,
       final String blockHash,

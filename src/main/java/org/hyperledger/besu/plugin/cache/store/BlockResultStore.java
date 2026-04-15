@@ -1,6 +1,7 @@
 package org.hyperledger.besu.plugin.cache.store;
 
 import org.hyperledger.besu.plugin.cache.analyzer.BlockAnalysisResult;
+import org.hyperledger.besu.plugin.cache.analyzer.BlockMetadata;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -12,7 +13,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 public class BlockResultStore {
 
   private final int maxBlocks;
-  private final ConcurrentLinkedDeque<BlockAnalysisResult> recentBlocks = new ConcurrentLinkedDeque<>();
+  private final ConcurrentLinkedDeque<Long> recentBlockNumbers = new ConcurrentLinkedDeque<>();
   private final ConcurrentHashMap<Long, BlockAnalysisResult> byBlockNumber = new ConcurrentHashMap<>();
 
   public BlockResultStore(final int maxBlocks) {
@@ -20,15 +21,27 @@ public class BlockResultStore {
   }
 
   public void store(final BlockAnalysisResult result) {
-    recentBlocks.addFirst(result);
+    recentBlockNumbers.addFirst(result.blockNumber());
     byBlockNumber.put(result.blockNumber(), result);
 
-    while (recentBlocks.size() > maxBlocks) {
-      BlockAnalysisResult evicted = recentBlocks.pollLast();
+    while (recentBlockNumbers.size() > maxBlocks) {
+      Long evicted = recentBlockNumbers.pollLast();
       if (evicted != null) {
-        byBlockNumber.remove(evicted.blockNumber());
+        byBlockNumber.remove(evicted);
       }
     }
+  }
+
+  /**
+   * Update the timing fields for a block after the BlockAddedListener fires.
+   * Since byBlockNumber is the single source of truth, getRecent/getLatest
+   * always return the updated data.
+   */
+  public void updateTimings(final long blockNumber, final long stateRootMs, final long totalBlockMs) {
+    byBlockNumber.computeIfPresent(blockNumber, (k, existing) -> {
+      BlockMetadata updated = existing.metadata().withTimings(stateRootMs, totalBlockMs);
+      return existing.withMetadata(updated);
+    });
   }
 
   public Optional<BlockAnalysisResult> getByBlockNumber(final long blockNumber) {
@@ -38,18 +51,21 @@ public class BlockResultStore {
   public List<BlockAnalysisResult> getRecent(final int count) {
     List<BlockAnalysisResult> result = new ArrayList<>();
     int i = 0;
-    for (BlockAnalysisResult r : recentBlocks) {
+    for (Long blockNum : recentBlockNumbers) {
       if (i++ >= count) break;
-      result.add(r);
+      BlockAnalysisResult r = byBlockNumber.get(blockNum);
+      if (r != null) result.add(r);
     }
     return result;
   }
 
   public Optional<BlockAnalysisResult> getLatest() {
-    return Optional.ofNullable(recentBlocks.peekFirst());
+    Long latest = recentBlockNumbers.peekFirst();
+    if (latest == null) return Optional.empty();
+    return Optional.ofNullable(byBlockNumber.get(latest));
   }
 
   public int size() {
-    return recentBlocks.size();
+    return recentBlockNumbers.size();
   }
 }

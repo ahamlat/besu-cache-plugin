@@ -33,6 +33,10 @@
   .gas-bar { height: 4px; border-radius: 2px; background: var(--border); margin-top: 4px; }
   .gas-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); }
 
+  .time-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 4px; background: var(--border); }
+  .time-bar .evm { background: var(--accent); }
+  .time-bar .sr { background: var(--mem); }
+
   table { width: 100%; border-collapse: collapse; background: var(--surface);
           border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
   th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -92,7 +96,7 @@
 <div class="section-title">Recent Blocks</div>
 <table class="recent-table" id="recentTable">
   <thead>
-    <tr><th>Block</th><th>Time</th><th>MGas/s</th><th>Txs</th><th>Gas</th><th>SLOADs</th>
+    <tr><th>Block</th><th>Total</th><th>EVM</th><th>Root</th><th>MGas/s</th><th>Txs</th><th>Gas</th><th>SLOADs</th>
         <th>Read</th><th>NotFnd</th><th>Cached</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
@@ -131,9 +135,13 @@ function fmtMs(ms) {
   return ms + 'ms';
 }
 
-function calcMgasPerSec(gasUsed, execMs) {
-  if (!execMs || execMs <= 0 || !gasUsed) return 0;
-  return (gasUsed / 1e6) / (execMs / 1000);
+function bestTime(d) {
+  return (d.totalBlockMs && d.totalBlockMs > 0) ? d.totalBlockMs : d.evmExecutionMs;
+}
+
+function calcMgasPerSec(gasUsed, ms) {
+  if (!ms || ms <= 0 || !gasUsed) return 0;
+  return (gasUsed / 1e6) / (ms / 1000);
 }
 
 function fmtMgas(mgas) {
@@ -166,13 +174,27 @@ function renderBlockInfo(d) {
   const gasP = d.gasUsedPercent || 0;
   const hasRdb = d.rocksdbStats;
 
-  const mgas = calcMgasPerSec(d.gasUsed, d.executionTimeMs);
-  const execColor = timeColor(d.executionTimeMs);
-  const execStyle = execColor ? ` style="color:${execColor}"` : '';
+  const totalMs = bestTime(d);
+  const mgas = calcMgasPerSec(d.gasUsed, totalMs);
+  const totalColor = timeColor(totalMs);
+  const totalStyle = totalColor ? ` style="color:${totalColor}"` : '';
+
+  const evmMs = d.evmExecutionMs || 0;
+  const srMs = d.stateRootMs || 0;
+  const hasSrTiming = d.totalBlockMs && d.totalBlockMs > 0;
+  const evmPct = hasSrTiming && totalMs > 0 ? (evmMs / totalMs * 100) : 100;
+  const srPct = hasSrTiming && totalMs > 0 ? (srMs / totalMs * 100) : 0;
 
   let html = `
     <div class="bi"><div class="lbl">Block</div><div class="val">${fmt(d.blockNumber)}</div></div>
-    <div class="bi"><div class="lbl">Exec Time</div><div class="val"${execStyle}>${fmtMs(d.executionTimeMs)}</div></div>
+    <div class="bi"><div class="lbl">Total Time</div><div class="val"${totalStyle}>${fmtMs(totalMs)}</div>
+      <div class="sub"><span style="color:var(--accent)">EVM ${fmtMs(evmMs)}</span>`;
+  if (hasSrTiming) {
+    html += ` &middot; <span style="color:var(--mem)">Root ${fmtMs(srMs)}</span>`;
+  }
+  html += `</div>
+      <div class="time-bar"><div class="evm" style="width:${evmPct}%"></div><div class="sr" style="width:${srPct}%"></div></div>
+    </div>
     <div class="bi"><div class="lbl">MGas/s</div><div class="val">${fmtMgas(mgas)}</div></div>
     <div class="bi"><div class="lbl">Transactions</div><div class="val">${d.transactionCount}</div></div>
     <div class="bi"><div class="lbl">Gas Used</div><div class="val">${fmtGas(d.gasUsed)}</div>
@@ -319,12 +341,16 @@ async function loadRecent() {
     const data = await fetchJson('/api/recent?count=30');
     const body = document.getElementById('recentBody');
     body.innerHTML = data.map(b => {
-      const tc = timeColor(b.executionTimeMs);
+      const totalMs = bestTime(b);
+      const tc = timeColor(totalMs);
       const tStyle = tc ? ` style="color:${tc}"` : '';
-      const mg = calcMgasPerSec(b.gasUsed, b.executionTimeMs);
+      const mg = calcMgasPerSec(b.gasUsed, totalMs);
+      const hasSr = b.totalBlockMs && b.totalBlockMs > 0;
       return `<tr onclick="document.getElementById('blockInput').value=${b.blockNumber};loadBlock()">
         <td>${b.blockNumber}</td>
-        <td${tStyle}>${fmtMs(b.executionTimeMs)}</td>
+        <td${tStyle}>${fmtMs(totalMs)}</td>
+        <td style="color:var(--accent)">${fmtMs(b.evmExecutionMs)}</td>
+        <td style="color:var(--mem)">${hasSr ? fmtMs(b.stateRootMs) : '-'}</td>
         <td>${fmtMgas(mg)}</td>
         <td>${b.txCount}</td>
         <td>${fmtGas(b.gasUsed)} <span style="color:var(--muted);font-size:10px">(${b.gasUsedPercent}%)</span></td>

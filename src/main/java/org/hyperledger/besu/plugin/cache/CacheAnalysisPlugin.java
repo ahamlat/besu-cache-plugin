@@ -9,6 +9,7 @@ import org.hyperledger.besu.plugin.cache.web.WebUiServer;
 
 import org.hyperledger.besu.plugin.BesuPlugin;
 import org.hyperledger.besu.plugin.ServiceManager;
+import org.hyperledger.besu.plugin.services.BesuEvents;
 import org.hyperledger.besu.plugin.services.BlockImportTracerProvider;
 import org.hyperledger.besu.plugin.services.RpcEndpointService;
 
@@ -18,8 +19,8 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Besu plugin that captures SLOAD operations during block import,
- * classifies them as warm/cold (EVM) and HIT/MISS/MEMTABLE/ACCUMULATOR (RocksDB),
- * resolves contract names, and exposes results via JSON-RPC and a web dashboard.
+ * classifies them, resolves contract names, and exposes results
+ * via JSON-RPC and a web dashboard.
  *
  * <p>Configuration via environment variables or system properties:
  * <ul>
@@ -40,6 +41,7 @@ public class CacheAnalysisPlugin implements BesuPlugin {
   private BlockResultStore store;
   private ContractNameResolver nameResolver;
   private RocksDBStatsProvider statsProvider;
+  private SloadTracerProvider tracerProvider;
   private WebUiServer webServer;
 
   @Override
@@ -53,7 +55,7 @@ public class CacheAnalysisPlugin implements BesuPlugin {
     this.nameResolver = new ContractNameResolver();
     this.statsProvider = new RocksDBStatsProvider();
 
-    SloadTracerProvider tracerProvider = new SloadTracerProvider(store, nameResolver, statsProvider);
+    this.tracerProvider = new SloadTracerProvider(store, nameResolver, statsProvider);
     serviceManager.addService(BlockImportTracerProvider.class, tracerProvider);
     LOG.info("Registered BlockImportTracerProvider for SLOAD tracing");
 
@@ -80,6 +82,28 @@ public class CacheAnalysisPlugin implements BesuPlugin {
           + "Stats may become available after the first block is imported.");
     }
 
+    serviceManager.getService(BesuEvents.class)
+        .ifPresentOrElse(
+            besuEvents -> {
+              besuEvents.addBlockAddedListener(context -> {
+                long blockAddedNanos = System.nanoTime();
+                long blockNumber = context.getBlockHeader().getNumber();
+
+                long[] nanos = tracerProvider.consumePendingTiming(blockNumber);
+                if (nanos == null) return;
+
+                long stateRootMs = (blockAddedNanos - nanos[1]) / 1_000_000;
+                long totalBlockMs = (blockAddedNanos - nanos[0]) / 1_000_000;
+
+                store.updateTimings(blockNumber, stateRootMs, totalBlockMs);
+                LOG.debug("Block {} total={}ms (evm={}ms, stateRoot+commit={}ms)",
+                    blockNumber, totalBlockMs,
+                    (nanos[1] - nanos[0]) / 1_000_000, stateRootMs);
+              });
+              LOG.info("Registered BlockAddedListener for state-root timing");
+            },
+            () -> LOG.warn("BesuEvents not available - state root timing will not be captured"));
+
     int webPort = getConfigInt("CACHE_PLUGIN_WEB_PORT", "cache.plugin.web.port", DEFAULT_WEB_PORT);
     webServer = new WebUiServer(store, nameResolver, statsProvider, webPort);
     webServer.start();
@@ -99,7 +123,6 @@ public class CacheAnalysisPlugin implements BesuPlugin {
     if (nameResolver != null) nameResolver.stop();
   }
 
-  /** Lazy init for RocksDB stats (called from tracer on first block if not already initialized). */
   public void retryStatsInit() {
     if (!statsProvider.isAvailable()) {
       statsProvider.init(serviceManager);

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -35,8 +36,8 @@ import org.slf4j.LoggerFactory;
  *   <li>Storage-level: CACHED / NOT_FOUND / STORAGE_READ</li>
  * </ul>
  *
- * Also captures block metadata (gas, base fee, blob info) and
- * measures wall-clock execution time between traceStartBlock and traceEndBlock.
+ * Captures block metadata and measures wall-clock EVM execution time.
+ * Stores pending nanos so the BlockAddedListener can compute state-root time.
  */
 public class SloadTracer implements BlockAwareOperationTracer {
 
@@ -46,6 +47,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private final BlockResultStore store;
   private final ContractNameResolver nameResolver;
   private final RocksDBStatsProvider statsProvider;
+  private final ConcurrentHashMap<Long, long[]> pendingTimings;
 
   private long currentBlockNumber;
   private String currentBlockHash;
@@ -63,13 +65,19 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private long currentGasLimit;
   private long currentBaseFeeWei;
 
+  /**
+   * @param pendingTimings shared map where traceEndBlock stores [blockStartNanos, blockEndNanos]
+   *                       keyed by block number, for the BlockAddedListener to consume.
+   */
   public SloadTracer(
       final BlockResultStore store,
       final ContractNameResolver nameResolver,
-      final RocksDBStatsProvider statsProvider) {
+      final RocksDBStatsProvider statsProvider,
+      final ConcurrentHashMap<Long, long[]> pendingTimings) {
     this.store = store;
     this.nameResolver = nameResolver;
     this.statsProvider = statsProvider;
+    this.pendingTimings = pendingTimings;
   }
 
   @Override
@@ -152,7 +160,8 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   @Override
   public void traceEndBlock(final BlockHeader blockHeader, final BlockBody blockBody) {
-    long executionTimeMs = (System.nanoTime() - blockStartNanos) / 1_000_000;
+    long blockEndNanos = System.nanoTime();
+    long evmExecutionMs = (blockEndNanos - blockStartNanos) / 1_000_000;
 
     if (currentBlockHash.isEmpty()) {
       currentBlockHash = blockHeader.getBlockHash().toHexString();
@@ -168,7 +177,8 @@ public class SloadTracer implements BlockAwareOperationTracer {
     }
 
     BlockMetadata metadata = new BlockMetadata(
-        executionTimeMs, gasUsed, currentGasLimit, currentBaseFeeWei,
+        evmExecutionMs, 0, 0,
+        gasUsed, currentGasLimit, currentBaseFeeWei,
         blobGasUsed, blobTxCount);
 
     RocksDBStatsProvider.Snapshot blockEndSnapshot = statsProvider.snapshot();
@@ -186,9 +196,12 @@ public class SloadTracer implements BlockAwareOperationTracer {
         metadata);
 
     store.store(result);
-    LOG.info("Block {} analyzed in {}ms: {} SLOADs ({} read, {} notfound, {} cached) "
+
+    pendingTimings.put(currentBlockNumber, new long[]{blockStartNanos, blockEndNanos});
+
+    LOG.info("Block {} EVM done in {}ms: {} SLOADs ({} read, {} notfound, {} cached) "
             + "gas {}/{} across {} contracts",
-        currentBlockNumber, executionTimeMs, result.totalSloads(),
+        currentBlockNumber, evmExecutionMs, result.totalSloads(),
         result.storageReads(), result.notFound(), result.cached(),
         gasUsed, currentGasLimit, result.accountStats().size());
   }
