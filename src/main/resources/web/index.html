@@ -92,7 +92,7 @@
 <div class="section-title">Recent Blocks</div>
 <table class="recent-table" id="recentTable">
   <thead>
-    <tr><th>Block</th><th>Time</th><th>Txs</th><th>Gas</th><th>SLOADs</th>
+    <tr><th>Block</th><th>Time</th><th>MGas/s</th><th>Txs</th><th>Gas</th><th>SLOADs</th>
         <th>Read</th><th>NotFnd</th><th>Cached</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
@@ -131,6 +131,20 @@ function fmtMs(ms) {
   return ms + 'ms';
 }
 
+function calcMgasPerSec(gasUsed, execMs) {
+  if (!execMs || execMs <= 0 || !gasUsed) return 0;
+  return (gasUsed / 1e6) / (execMs / 1000);
+}
+
+function fmtMgas(mgas) {
+  if (!mgas) return '-';
+  return mgas.toFixed(1);
+}
+
+function timeColor(ms) {
+  return (ms && ms > 500) ? 'var(--miss)' : '';
+}
+
 async function loadBlock() {
   const val = document.getElementById('blockInput').value.trim() || 'latest';
   try {
@@ -152,9 +166,14 @@ function renderBlockInfo(d) {
   const gasP = d.gasUsedPercent || 0;
   const hasRdb = d.rocksdbStats;
 
+  const mgas = calcMgasPerSec(d.gasUsed, d.executionTimeMs);
+  const execColor = timeColor(d.executionTimeMs);
+  const execStyle = execColor ? ` style="color:${execColor}"` : '';
+
   let html = `
     <div class="bi"><div class="lbl">Block</div><div class="val">${fmt(d.blockNumber)}</div></div>
-    <div class="bi"><div class="lbl">Exec Time</div><div class="val">${fmtMs(d.executionTimeMs)}</div></div>
+    <div class="bi"><div class="lbl">Exec Time</div><div class="val"${execStyle}>${fmtMs(d.executionTimeMs)}</div></div>
+    <div class="bi"><div class="lbl">MGas/s</div><div class="val">${fmtMgas(mgas)}</div></div>
     <div class="bi"><div class="lbl">Transactions</div><div class="val">${d.transactionCount}</div></div>
     <div class="bi"><div class="lbl">Gas Used</div><div class="val">${fmtGas(d.gasUsed)}</div>
       <div class="sub">${gasP}% of ${fmtGas(d.gasLimit)}</div>
@@ -299,10 +318,14 @@ async function loadRecent() {
   try {
     const data = await fetchJson('/api/recent?count=30');
     const body = document.getElementById('recentBody');
-    body.innerHTML = data.map(b => `
-      <tr onclick="document.getElementById('blockInput').value=${b.blockNumber};loadBlock()">
+    body.innerHTML = data.map(b => {
+      const tc = timeColor(b.executionTimeMs);
+      const tStyle = tc ? ` style="color:${tc}"` : '';
+      const mg = calcMgasPerSec(b.gasUsed, b.executionTimeMs);
+      return `<tr onclick="document.getElementById('blockInput').value=${b.blockNumber};loadBlock()">
         <td>${b.blockNumber}</td>
-        <td>${fmtMs(b.executionTimeMs)}</td>
+        <td${tStyle}>${fmtMs(b.executionTimeMs)}</td>
+        <td>${fmtMgas(mg)}</td>
         <td>${b.txCount}</td>
         <td>${fmtGas(b.gasUsed)} <span style="color:var(--muted);font-size:10px">(${b.gasUsedPercent}%)</span></td>
         <td>${b.totalSloads}</td>
@@ -312,7 +335,8 @@ async function loadRecent() {
         <td style="color:var(--cold)">${b.coldSloads}</td>
         <td style="color:var(--warm)">${b.warmSloads}</td>
         <td>${b.contracts}</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
   } catch(e) {}
 }
 
