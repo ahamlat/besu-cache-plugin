@@ -155,13 +155,13 @@ public class RocksDBStatsProvider {
 
     /**
      * Classify which storage layer served an SLOAD based on ticker deltas.
+     * Cost is dominated by the slowest layer touched, so DISK wins over BLOCK_CACHE
+     * when a multi-level lookup hits both cached and uncached data blocks.
      * <ul>
-     *   <li>ACCUMULATOR: no memtable hit/miss delta -- no RocksDB get() called,
-     *       value served from Bonsai in-memory accumulator</li>
-     *   <li>MEMTABLE: memtableHit increased -- value found in RocksDB write buffer</li>
-     *   <li>BLOCK_CACHE: blockCacheHit increased (or memtableMiss with no data block access,
-     *       meaning bloom filter blocks in cache rejected the key) -- from RocksDB block cache</li>
-     *   <li>DISK: blockCacheMiss increased -- had to read SST data block from disk</li>
+     *   <li>ACCUMULATOR: no memtable hit/miss -- no RocksDB get() called</li>
+     *   <li>MEMTABLE: memtableHit increased -- found in RocksDB write buffer</li>
+     *   <li>DISK: blockCacheMiss increased -- at least one data block read from SST file</li>
+     *   <li>BLOCK_CACHE: blockCacheHit increased, no miss -- all data blocks from cache</li>
      * </ul>
      */
     public String classifyLayer(final MiniSnapshot before) {
@@ -172,10 +172,9 @@ public class RocksDBStatsProvider {
 
       if (dMemHit == 0 && dMemMiss == 0) return "ACCUMULATOR";
       if (dMemHit > 0) return "MEMTABLE";
-      if (dHit > 0) return "BLOCK_CACHE";
       if (dMiss > 0) return "DISK";
-      // memtableMiss > 0 but no data block access: bloom filter rejected the key.
-      // Filter blocks reside in block cache, so this is effectively a cache-served lookup.
+      if (dHit > 0) return "BLOCK_CACHE";
+      // memtableMiss > 0 but no data block access: bloom filter rejected at all levels.
       return "BLOCK_CACHE";
     }
   }
