@@ -58,6 +58,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private Address pendingAddress;
   private UInt256 pendingSlot;
   private RocksDBStatsProvider.MiniSnapshot preSloadSnapshot;
+  private long preSloadNanos;
   private int sstoreCount;
 
   private RocksDBStatsProvider.Snapshot blockStartSnapshot;
@@ -129,6 +130,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
       Bytes raw = frame.getStackItem(0);
       pendingSlot = UInt256.fromBytes(raw);
       preSloadSnapshot = statsProvider.miniSnapshot();
+      preSloadNanos = System.nanoTime();
     } else if (opcode == SSTORE_OPCODE) {
       sstoreCount++;
     }
@@ -137,13 +139,19 @@ public class SloadTracer implements BlockAwareOperationTracer {
   @Override
   public void tracePostExecution(final MessageFrame frame, final OperationResult operationResult) {
     if (pendingAddress != null) {
+      long latencyUs = (System.nanoTime() - preSloadNanos) / 1_000;
       long gasCost = operationResult.getGasCost();
       boolean isCold = gasCost > 200;
 
       String storageType;
+      long dMemHit = 0, dMemMiss = 0, dCacheHit = 0, dCacheMiss = 0;
       if (statsProvider.isAvailable()) {
         RocksDBStatsProvider.MiniSnapshot postSnapshot = statsProvider.miniSnapshot();
         storageType = postSnapshot.classifyLayer(preSloadSnapshot);
+        dMemHit = postSnapshot.memtableHit() - preSloadSnapshot.memtableHit();
+        dMemMiss = postSnapshot.memtableMiss() - preSloadSnapshot.memtableMiss();
+        dCacheHit = postSnapshot.blockCacheHit() - preSloadSnapshot.blockCacheHit();
+        dCacheMiss = postSnapshot.blockCacheMiss() - preSloadSnapshot.blockCacheMiss();
       } else {
         storageType = "ACCUMULATOR";
       }
@@ -151,7 +159,8 @@ public class SloadTracer implements BlockAwareOperationTracer {
       Bytes loadedValue = frame.getStackItem(0);
       boolean notFound = loadedValue.isZero();
 
-      sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType, notFound));
+      sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType, notFound,
+          latencyUs, dMemHit, dMemMiss, dCacheHit, dCacheMiss));
       nameResolver.enqueue(pendingAddress);
 
       pendingAddress = null;

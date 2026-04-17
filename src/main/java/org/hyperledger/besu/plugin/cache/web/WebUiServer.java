@@ -131,6 +131,11 @@ public class WebUiServer {
       entry.put("storageType", r.storageType());
       entry.put("notFound", r.notFound());
       entry.put("txIndex", r.transactionIndex());
+      entry.put("latencyUs", r.latencyUs());
+      entry.put("dMemHit", r.dMemHit());
+      entry.put("dMemMiss", r.dMemMiss());
+      entry.put("dCacheHit", r.dCacheHit());
+      entry.put("dCacheMiss", r.dCacheMiss());
       sloads.add(entry);
     }
 
@@ -180,6 +185,8 @@ public class WebUiServer {
     entry.put("coldSloads", r.coldSloads());
     entry.put("warmSloads", r.warmSloads());
     entry.put("contracts", r.accountStats().size());
+    entry.put("totalSloadTimeUs", r.totalSloadTimeUs());
+    entry.put("maxSloadLatencyUs", r.maxSloadLatencyUs());
     addMetadata(entry, r.metadata());
     if (r.rocksdbStatsAvailable()) {
       entry.put("blockDataCacheHit", r.blockDataCacheHit());
@@ -213,6 +220,13 @@ public class WebUiServer {
       response.put("blockMemtableHit", r.blockMemtableHit());
     }
     response.put("rocksdbStats", r.rocksdbStatsAvailable());
+    response.put("totalSloadTimeUs", r.totalSloadTimeUs());
+    response.put("maxSloadLatencyUs", r.maxSloadLatencyUs());
+    response.put("avgAccumUs", r.avgAccumUs());
+    response.put("avgMemtableUs", r.avgMemtableUs());
+    response.put("avgBlockCacheUs", r.avgBlockCacheUs());
+    response.put("avgDiskUs", r.avgDiskUs());
+    response.put("uniqueSlots", r.uniqueSlots());
 
     List<Map<String, Object>> accounts = new ArrayList<>();
     for (AccountStats a : r.accountStats()) {
@@ -234,6 +248,9 @@ public class WebUiServer {
       acc.put("warm", a.warmReads());
       acc.put("coldPercent", Math.round(a.coldPercent() * 10.0) / 10.0);
       acc.put("warmPercent", Math.round(a.warmPercent() * 10.0) / 10.0);
+      acc.put("totalTimeUs", a.totalTimeUs());
+      acc.put("maxTimeUs", a.maxTimeUs());
+      acc.put("avgTimeUs", a.avgTimeUs());
       accounts.add(acc);
     }
     response.put("accounts", accounts);
