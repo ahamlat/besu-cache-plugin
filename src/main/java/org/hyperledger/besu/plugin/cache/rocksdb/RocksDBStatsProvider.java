@@ -146,13 +146,23 @@ public class RocksDBStatsProvider {
 
     /**
      * Classify which storage layer served an SLOAD based on ticker deltas.
-     * Cost is dominated by the slowest layer touched, so DISK wins over BLOCK_CACHE
-     * when a multi-level lookup hits both cached and uncached data blocks.
+     *
+     * <p>A single EVM SLOAD can trigger more than one RocksDB {@code get()} under
+     * Besu's Bonsai flat-DB layer (flat storage lookup plus trie-fallback or
+     * cross-CF metadata lookups). Each {@code get()} independently bumps
+     * {@code MEMTABLE_HIT} or {@code MEMTABLE_MISS}, so we can legitimately see
+     * a mix where one get hits the memtable and another misses it all the way to
+     * disk. In that case the wall-clock latency is dominated by the slowest get,
+     * so the classification must match.
+     *
+     * <p>Priority (slowest layer wins): DISK &gt; BLOCK_CACHE &gt; MEMTABLE &gt; ACCUMULATOR.
      * <ul>
-     *   <li>ACCUMULATOR: no memtable hit/miss -- no RocksDB get() called</li>
-     *   <li>MEMTABLE: memtableHit increased -- found in RocksDB write buffer</li>
-     *   <li>DISK: blockCacheMiss increased -- at least one data block read from SST file</li>
-     *   <li>BLOCK_CACHE: blockCacheHit increased, no miss -- all data blocks from cache</li>
+     *   <li>ACCUMULATOR: no memtable hit/miss -- no RocksDB get() at all</li>
+     *   <li>DISK: blockCacheMiss increased -- at least one SST data block read from disk</li>
+     *   <li>BLOCK_CACHE: blockCacheHit increased with no disk miss -- all data blocks cached</li>
+     *   <li>MEMTABLE: memtableHit increased with no block-cache activity -- RAM-only</li>
+     *   <li>bloom-rejected (memtableMiss only, no data block touched): attributed to
+     *       BLOCK_CACHE since index/bloom blocks come from there</li>
      * </ul>
      */
     public String classifyLayer(final MiniSnapshot before) {
@@ -161,10 +171,13 @@ public class RocksDBStatsProvider {
       long dHit     = blockCacheHit - before.blockCacheHit;
       long dMiss    = blockCacheMiss - before.blockCacheMiss;
 
+      // No RocksDB call at all -> served by the in-memory accumulator.
       if (dMemHit == 0 && dMemMiss == 0) return "ACCUMULATOR";
-      if (dMemHit > 0) return "MEMTABLE";
+      // Slowest layer touched dictates wall-clock latency: check disk, then
+      // block cache, and only fall through to MEMTABLE if neither fired.
       if (dMiss > 0) return "DISK";
       if (dHit > 0) return "BLOCK_CACHE";
+      if (dMemHit > 0) return "MEMTABLE";
       // memtableMiss > 0 but no data block access: bloom filter rejected at all levels.
       return "BLOCK_CACHE";
     }
