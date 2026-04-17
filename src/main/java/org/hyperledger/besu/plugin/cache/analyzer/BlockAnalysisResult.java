@@ -47,6 +47,20 @@ public record BlockAnalysisResult(
     return totalSloads > 0 ? coldSloads * 100.0 / totalSloads : 0;
   }
 
+  /**
+   * Return the slowest SLOAD captured for this block, or {@code null} when the block
+   * does not contain any SLOAD operation.
+   */
+  public SloadRecord slowestSload() {
+    SloadRecord slowest = null;
+    for (SloadRecord sload : sloads) {
+      if (slowest == null || sload.latencyUs() > slowest.latencyUs()) {
+        slowest = sload;
+      }
+    }
+    return slowest;
+  }
+
   /** Return a copy with updated metadata (used for post-listener timing update). */
   public BlockAnalysisResult withMetadata(final BlockMetadata newMetadata) {
     return new BlockAnalysisResult(
@@ -76,24 +90,37 @@ public record BlockAnalysisResult(
     long totalTimeUs = 0, maxLatencyUs = 0;
     long accumTimeSum = 0, memTimeSum = 0, bCacheTimeSum = 0, diskTimeSum = 0;
 
-    // perAccount: [cold, warm, accum, mem, bcache, disk, nf, totalTimeUs(high), totalTimeUs(low), maxTimeUs(high), maxTimeUs(low)]
-    // Using long[] to store both int counts and long times
+    // perAccount: [cold, warm, accum, mem, bcache, disk, nf, totalTimeUs, maxTimeUs]
     Map<String, long[]> perAccount = new LinkedHashMap<>();
     Set<String> uniqueSlotKeys = new HashSet<>();
 
     for (SloadRecord r : sloads) {
       String addr = r.contractAddress().toHexString().toLowerCase();
       String slotId = addr + ":" + r.slotKey().toHexString();
-      uniqueSlotKeys.add(slotId);
 
       long[] counts = perAccount.computeIfAbsent(addr, k -> new long[9]);
       if (r.isCold()) { cold++; counts[0]++; } else { warm++; counts[1]++; }
 
       switch (r.storageType()) {
         case "ACCUMULATOR" -> { totalAccum++; counts[2]++; accumTimeSum += r.latencyUs(); }
-        case "MEMTABLE"    -> { totalMem++;   counts[3]++; memTimeSum += r.latencyUs(); }
-        case "BLOCK_CACHE" -> { totalBCache++; counts[4]++; bCacheTimeSum += r.latencyUs(); }
-        case "DISK"        -> { totalDisk++;  counts[5]++; diskTimeSum += r.latencyUs(); }
+        case "MEMTABLE"    -> {
+          totalMem++;
+          counts[3]++;
+          memTimeSum += r.latencyUs();
+          uniqueSlotKeys.add(slotId);
+        }
+        case "BLOCK_CACHE" -> {
+          totalBCache++;
+          counts[4]++;
+          bCacheTimeSum += r.latencyUs();
+          uniqueSlotKeys.add(slotId);
+        }
+        case "DISK"        -> {
+          totalDisk++;
+          counts[5]++;
+          diskTimeSum += r.latencyUs();
+          uniqueSlotKeys.add(slotId);
+        }
         default            -> { totalAccum++; counts[2]++; accumTimeSum += r.latencyUs(); }
       }
 

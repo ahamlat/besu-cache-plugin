@@ -74,20 +74,7 @@ public class CacheAnalysisRpcMethods {
     for (SloadRecord r : result.sloads()) {
       String addr = r.contractAddress().toHexString().toLowerCase();
       if (filterAddress != null && !addr.equals(filterAddress)) continue;
-      Map<String, Object> entry = new LinkedHashMap<>();
-      entry.put("address", addr);
-      entry.put("contractName", nameResolver.getName(addr));
-      entry.put("slot", r.slotKey().toHexString());
-      entry.put("cold", r.isCold());
-      entry.put("storageType", r.storageType());
-      entry.put("notFound", r.notFound());
-      entry.put("txIndex", r.transactionIndex());
-      entry.put("latencyUs", r.latencyUs());
-      entry.put("dMemHit", r.dMemHit());
-      entry.put("dMemMiss", r.dMemMiss());
-      entry.put("dCacheHit", r.dCacheHit());
-      entry.put("dCacheMiss", r.dCacheMiss());
-      sloads.add(entry);
+      sloads.add(serializeSload(r));
     }
 
     Map<String, Object> response = new LinkedHashMap<>();
@@ -104,21 +91,7 @@ public class CacheAnalysisRpcMethods {
 
     List<Map<String, Object>> blocks = new ArrayList<>();
     for (BlockAnalysisResult r : store.getRecent(count)) {
-      Map<String, Object> entry = new LinkedHashMap<>();
-      entry.put("blockNumber", r.blockNumber());
-      entry.put("txCount", r.transactionCount());
-      entry.put("totalSloads", r.totalSloads());
-      entry.put("totalSstores", r.totalSstores());
-      entry.put("accumulator", r.accumulator());
-      entry.put("memtable", r.memtable());
-      entry.put("blockCache", r.blockCache());
-      entry.put("disk", r.disk());
-      entry.put("notFound", r.notFound());
-      entry.put("coldSloads", r.coldSloads());
-      entry.put("warmSloads", r.warmSloads());
-      entry.put("contracts", r.accountStats().size());
-      addMetadata(entry, r.metadata());
-      blocks.add(entry);
+      blocks.add(serializeBlockSummary(r));
     }
     return blocks;
   }
@@ -174,6 +147,10 @@ public class CacheAnalysisRpcMethods {
     response.put("avgBlockCacheUs", r.avgBlockCacheUs());
     response.put("avgDiskUs", r.avgDiskUs());
     response.put("uniqueSlots", r.uniqueSlots());
+    Map<String, Object> slowest = serializeSload(r.slowestSload());
+    if (slowest != null) {
+      response.put("slowestSload", slowest);
+    }
 
     List<Map<String, Object>> accounts = new ArrayList<>();
     for (AccountStats a : r.accountStats()) {
@@ -202,6 +179,53 @@ public class CacheAnalysisRpcMethods {
     }
     response.put("accounts", accounts);
     return response;
+  }
+
+  private Map<String, Object> serializeBlockSummary(final BlockAnalysisResult r) {
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("blockNumber", r.blockNumber());
+    entry.put("txCount", r.transactionCount());
+    entry.put("totalSloads", r.totalSloads());
+    entry.put("totalSstores", r.totalSstores());
+    entry.put("accumulator", r.accumulator());
+    entry.put("memtable", r.memtable());
+    entry.put("blockCache", r.blockCache());
+    entry.put("disk", r.disk());
+    entry.put("notFound", r.notFound());
+    entry.put("coldSloads", r.coldSloads());
+    entry.put("warmSloads", r.warmSloads());
+    entry.put("contracts", r.accountStats().size());
+    entry.put("totalSloadTimeUs", r.totalSloadTimeUs());
+    entry.put("maxSloadLatencyUs", r.maxSloadLatencyUs());
+    addMetadata(entry, r.metadata());
+    if (r.rocksdbStatsAvailable()) {
+      entry.put("blockDataCacheHit", r.blockDataCacheHit());
+      entry.put("blockDataCacheMiss", r.blockDataCacheMiss());
+      entry.put("blockMemtableHit", r.blockMemtableHit());
+    }
+    entry.put("rocksdbStats", r.rocksdbStatsAvailable());
+    return entry;
+  }
+
+  private Map<String, Object> serializeSload(final SloadRecord r) {
+    if (r == null) {
+      return null;
+    }
+    String addr = r.contractAddress().toHexString().toLowerCase();
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("address", addr);
+    entry.put("contractName", nameResolver.getName(addr));
+    entry.put("slot", r.slotKey().toHexString());
+    entry.put("cold", r.isCold());
+    entry.put("storageType", r.storageType());
+    entry.put("notFound", r.notFound());
+    entry.put("txIndex", r.transactionIndex());
+    entry.put("latencyUs", r.latencyUs());
+    entry.put("dMemHit", r.dMemHit());
+    entry.put("dMemMiss", r.dMemMiss());
+    entry.put("dCacheHit", r.dCacheHit());
+    entry.put("dCacheMiss", r.dCacheMiss());
+    return entry;
   }
 
   private static void addMetadata(final Map<String, Object> map, final BlockMetadata m) {

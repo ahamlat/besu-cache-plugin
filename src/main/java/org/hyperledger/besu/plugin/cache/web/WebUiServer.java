@@ -123,20 +123,7 @@ public class WebUiServer {
     for (SloadRecord r : result.sloads()) {
       String addr = r.contractAddress().toHexString().toLowerCase();
       if (filterAddress != null && !addr.equalsIgnoreCase(filterAddress)) continue;
-      Map<String, Object> entry = new LinkedHashMap<>();
-      entry.put("address", addr);
-      entry.put("contractName", nameResolver.getName(addr));
-      entry.put("slot", r.slotKey().toHexString());
-      entry.put("cold", r.isCold());
-      entry.put("storageType", r.storageType());
-      entry.put("notFound", r.notFound());
-      entry.put("txIndex", r.transactionIndex());
-      entry.put("latencyUs", r.latencyUs());
-      entry.put("dMemHit", r.dMemHit());
-      entry.put("dMemMiss", r.dMemMiss());
-      entry.put("dCacheHit", r.dCacheHit());
-      entry.put("dCacheMiss", r.dCacheMiss());
-      sloads.add(entry);
+      sloads.add(serializeSload(r));
     }
 
     Map<String, Object> response = new LinkedHashMap<>();
@@ -227,6 +214,10 @@ public class WebUiServer {
     response.put("avgBlockCacheUs", r.avgBlockCacheUs());
     response.put("avgDiskUs", r.avgDiskUs());
     response.put("uniqueSlots", r.uniqueSlots());
+    Map<String, Object> slowest = serializeSload(r.slowestSload());
+    if (slowest != null) {
+      response.put("slowestSload", slowest);
+    }
 
     List<Map<String, Object>> accounts = new ArrayList<>();
     for (AccountStats a : r.accountStats()) {
@@ -268,6 +259,27 @@ public class WebUiServer {
     map.put("baseFeeGwei", Math.round(m.baseFeeGwei() * 1000.0) / 1000.0);
     map.put("blobGasUsed", m.blobGasUsed());
     map.put("blobTxCount", m.blobTxCount());
+  }
+
+  private Map<String, Object> serializeSload(final SloadRecord r) {
+    if (r == null) {
+      return null;
+    }
+    String addr = r.contractAddress().toHexString().toLowerCase();
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("address", addr);
+    entry.put("contractName", nameResolver.getName(addr));
+    entry.put("slot", r.slotKey().toHexString());
+    entry.put("cold", r.isCold());
+    entry.put("storageType", r.storageType());
+    entry.put("notFound", r.notFound());
+    entry.put("txIndex", r.transactionIndex());
+    entry.put("latencyUs", r.latencyUs());
+    entry.put("dMemHit", r.dMemHit());
+    entry.put("dMemMiss", r.dMemMiss());
+    entry.put("dCacheHit", r.dCacheHit());
+    entry.put("dCacheMiss", r.dCacheMiss());
+    return entry;
   }
 
   private long parseBlockParam(final RoutingContext ctx) {

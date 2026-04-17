@@ -359,10 +359,12 @@ function renderBlockInfo(d) {
 
   const avgSloadUs = d.totalSloads > 0 ? Math.round((d.totalSloadTimeUs||0) / d.totalSloads) : 0;
   const nonAccum = (d.memtable||0) + (d.blockCache||0) + (d.disk||0);
+  const uniqueDbSlots = d.uniqueSlots ?? nonAccum;
+  const slowest = d.slowestSload || null;
 
   html += `
     <div class="bi"><div class="lbl">SLOADs</div><div class="val">${fmt(d.totalSloads)}</div>
-      <div class="sub">${fmt(d.uniqueSlots||nonAccum)} unique slots</div></div>
+      <div class="sub">${fmt(uniqueDbSlots)} RocksDB-backed unique slots</div></div>
     <div class="bi"><div class="lbl">SLOAD Time</div><div class="val">${fmtUs(d.totalSloadTimeUs)}</div>
       <div class="sub">avg ${fmtUs(avgSloadUs)} &middot; max ${fmtUs(d.maxSloadLatencyUs)}</div></div>
     <div class="bi"><div class="lbl">SSTOREs</div><div class="val">${fmt(d.totalSstores)}</div></div>
@@ -379,6 +381,16 @@ function renderBlockInfo(d) {
     <div class="bi"><div class="lbl">Cold (EVM)</div><div class="val" style="color:var(--cold)">${fmt(d.coldSloads)}</div></div>
     <div class="bi"><div class="lbl">Warm (EVM)</div><div class="val" style="color:var(--warm)">${fmt(d.warmSloads)}</div></div>
     <div class="bi"><div class="lbl">Contracts</div><div class="val">${d.accounts.length}</div></div>`;
+
+  if (slowest) {
+    const slowestOwner = slowest.contractName || slowest.address;
+    const slowestMeta = `${slowest.storageType}${slowest.notFound ? ' · NOT FOUND' : ''} · tx ${slowest.txIndex}`;
+    html += `<div class="bi"><div class="lbl">Slowest SLOAD</div>
+      <div class="val" style="color:var(--disk)">${fmtUs(slowest.latencyUs)}</div>
+      <div class="sub">${slowestOwner}</div>
+      <div class="sub">${slowestMeta}</div>
+      <div class="sub addr">${slowest.slot}</div></div>`;
+  }
 
   if (hasRdb) {
     html += `<div class="bi"><div class="lbl">RocksDB Block Totals</div>
