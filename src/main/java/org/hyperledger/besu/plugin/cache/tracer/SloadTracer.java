@@ -11,7 +11,10 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Transaction;
 import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.evm.frame.MessageFrame;
+import org.hyperledger.besu.evm.operation.Operation;
 import org.hyperledger.besu.evm.operation.Operation.OperationResult;
+import org.hyperledger.besu.evm.operation.SLoadOperation;
+import org.hyperledger.besu.evm.operation.SStoreOperation;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.data.BlockBody;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -40,8 +43,6 @@ import org.slf4j.LoggerFactory;
 public class SloadTracer implements BlockAwareOperationTracer {
 
   private static final Logger LOG = LoggerFactory.getLogger(SloadTracer.class);
-  private static final int SLOAD_OPCODE = 0x54;
-  private static final int SSTORE_OPCODE = 0x55;
 
   private final BlockResultStore store;
   private final ContractNameResolver nameResolver;
@@ -124,14 +125,19 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
   @Override
   public void tracePreExecution(final MessageFrame frame) {
-    int opcode = frame.getCurrentOperation().getOpcode();
-    if (opcode == SLOAD_OPCODE) {
+    // Avoid Operation.getOpcode() here: with ~140 concrete Operation subclasses
+    // the inline cache at this site goes megamorphic and every invocation pays
+    // an itable-stub lookup. Instead, klass-check for the two ops we care about
+    // -- HotSpot compiles "instanceof <leaf class>" into a single klass pointer
+    // comparison (no dispatch, no boxing).
+    final Operation op = frame.getCurrentOperation();
+    if (op instanceof SLoadOperation) {
       pendingAddress = frame.getRecipientAddress();
       Bytes raw = frame.getStackItem(0);
       pendingSlot = UInt256.fromBytes(raw);
       preSloadSnapshot = statsProvider.miniSnapshot();
       preSloadNanos = System.nanoTime();
-    } else if (opcode == SSTORE_OPCODE) {
+    } else if (op instanceof SStoreOperation) {
       sstoreCount++;
     }
   }
