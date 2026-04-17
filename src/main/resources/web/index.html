@@ -200,6 +200,14 @@ function fmtMgas(mgas) {
   return mgas.toFixed(1);
 }
 
+function shortHex(h, headChars, tailChars) {
+  if (!h) return '';
+  const head = headChars || 6;
+  const tail = tailChars || 2;
+  if (h.length <= head + tail + 3) return h;
+  return h.slice(0, head) + '…' + h.slice(-tail);
+}
+
 // Adaptive formatter for nanosecond durations. Picks the tightest unit
 // (ns / µs / ms / s) so sub-microsecond paths (accumulator hits) stay visible.
 function fmtNs(ns) {
@@ -662,13 +670,18 @@ function renderBlockInfo(d) {
     <div class="bi"><div class="lbl">Contracts</div><div class="val">${d.accounts.length}</div></div>`;
 
   if (slowest) {
-    const slowestOwner = slowest.contractName || slowest.address;
+    const slowestOwner = slowest.contractName
+      ? slowest.contractName
+      : shortHex(slowest.address);
+    const slowestOwnerTitle = slowest.contractName
+      ? `${slowest.contractName} (${slowest.address})`
+      : slowest.address;
     const slowestMeta = `${slowest.storageType}${slowest.notFound ? ' · NOT FOUND' : ''} · tx ${slowest.txIndex}`;
     html += `<div class="bi"><div class="lbl">Slowest SLOAD</div>
       <div class="val" style="color:var(--disk)">${fmtNs(slowest.latencyNs)}</div>
-      <div class="sub">${slowestOwner}</div>
+      <div class="sub addr" title="${slowestOwnerTitle}">${slowestOwner}</div>
       <div class="sub">${slowestMeta}</div>
-      <div class="sub addr">${slowest.slot}</div></div>`;
+      <div class="sub addr" title="${slowest.slot}">${shortHex(slowest.slot)}</div></div>`;
   }
 
   if (hasRdb) {
