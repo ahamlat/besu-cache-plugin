@@ -93,8 +93,8 @@
     <option value="disk">Sort: Disk</option>
     <option value="notFound">Sort: NotFound</option>
     <option value="diskPercent">Sort: Disk%</option>
-    <option value="totalTimeUs">Sort: Time</option>
-    <option value="maxTimeUs">Sort: Max Latency</option>
+    <option value="totalTimeNs">Sort: Time</option>
+    <option value="maxTimeNs">Sort: Max Latency</option>
     <option value="cold">Sort: Cold</option>
     <option value="contractName">Sort: Name</option>
   </select>
@@ -168,11 +168,17 @@ function fmtMgas(mgas) {
   return mgas.toFixed(1);
 }
 
-function fmtUs(us) {
-  if (us === undefined || us === null) return '-';
-  if (us >= 1000000) return (us/1000000).toFixed(2) + 's';
-  if (us >= 1000) return (us/1000).toFixed(1) + 'ms';
-  return us + 'us';
+// Adaptive formatter for nanosecond durations. Picks the tightest unit
+// (ns / µs / ms / s) so sub-microsecond paths (accumulator hits) stay visible.
+function fmtNs(ns) {
+  if (ns === undefined || ns === null) return '-';
+  if (ns < 0) ns = 0;
+  if (ns < 1000) return ns + 'ns';
+  if (ns < 10000) return (ns/1000).toFixed(2) + 'µs';
+  if (ns < 1000000) return (ns/1000).toFixed(1) + 'µs';
+  if (ns < 10000000) return (ns/1000000).toFixed(2) + 'ms';
+  if (ns < 1000000000) return (ns/1000000).toFixed(1) + 'ms';
+  return (ns/1000000000).toFixed(2) + 's';
 }
 
 function timeColor(ms) {
@@ -264,14 +270,14 @@ function renderPieCharts(d) {
     {label:'Warm', value:d.warmSloads||0, pct:(d.warmSloads||0)/total*100, color:'#3fb950'}
   ];
 
-  const aUs = d.avgAccumUs || 0, mUs = d.avgMemtableUs || 0;
-  const cUs = d.avgBlockCacheUs || 0, dUs = d.avgDiskUs || 0;
-  const maxLayer = Math.max(aUs, mUs, cUs, dUs, 1);
+  const aNs = d.avgAccumNs || 0, mNs = d.avgMemtableNs || 0;
+  const cNs = d.avgBlockCacheNs || 0, dNs = d.avgDiskNs || 0;
+  const maxLayer = Math.max(aNs, mNs, cNs, dNs, 1);
   const latencyPie = [
-    {label:'Accumulator', value:aUs, pct: aUs/maxLayer*100, color:'#8b949e'},
-    {label:'Memtable',    value:mUs, pct: mUs/maxLayer*100, color:'#d29922'},
-    {label:'Block Cache', value:cUs, pct: cUs/maxLayer*100, color:'#3fb950'},
-    {label:'Disk',        value:dUs, pct: dUs/maxLayer*100, color:'#f85149'}
+    {label:'Accumulator', value:aNs, pct: aNs/maxLayer*100, color:'#8b949e'},
+    {label:'Memtable',    value:mNs, pct: mNs/maxLayer*100, color:'#d29922'},
+    {label:'Block Cache', value:cNs, pct: cNs/maxLayer*100, color:'#3fb950'},
+    {label:'Disk',        value:dNs, pct: dNs/maxLayer*100, color:'#f85149'}
   ];
 
   let html = buildPieCard('Block Time', timePie);
@@ -292,7 +298,7 @@ function buildLatencyCard(title, items) {
       <div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden">
         <div style="width:${it.value/maxVal*100}%;height:100%;background:${it.color};border-radius:4px"></div>
       </div>
-      <span style="font-size:11px;font-weight:700;min-width:55px;text-align:right">${fmtUs(it.value)}</span>
+      <span style="font-size:11px;font-weight:700;min-width:55px;text-align:right">${fmtNs(it.value)}</span>
     </div>`).join('')}
   </div>`;
 }
@@ -357,7 +363,7 @@ function renderBlockInfo(d) {
       <div class="sub">${fmtGas(d.blobGasUsed)} blob gas</div></div>`;
   }
 
-  const avgSloadUs = d.totalSloads > 0 ? Math.round((d.totalSloadTimeUs||0) / d.totalSloads) : 0;
+  const avgSloadNs = d.totalSloads > 0 ? Math.round((d.totalSloadTimeNs||0) / d.totalSloads) : 0;
   const nonAccum = (d.memtable||0) + (d.blockCache||0) + (d.disk||0);
   const uniqueDbSlots = d.uniqueSlots ?? nonAccum;
   const slowest = d.slowestSload || null;
@@ -365,17 +371,17 @@ function renderBlockInfo(d) {
   html += `
     <div class="bi"><div class="lbl">SLOADs</div><div class="val">${fmt(d.totalSloads)}</div>
       <div class="sub">${fmt(uniqueDbSlots)} RocksDB-backed unique slots</div></div>
-    <div class="bi"><div class="lbl">SLOAD Time</div><div class="val">${fmtUs(d.totalSloadTimeUs)}</div>
-      <div class="sub">avg ${fmtUs(avgSloadUs)} &middot; max ${fmtUs(d.maxSloadLatencyUs)}</div></div>
+    <div class="bi"><div class="lbl">SLOAD Time</div><div class="val">${fmtNs(d.totalSloadTimeNs)}</div>
+      <div class="sub">avg ${fmtNs(avgSloadNs)} &middot; max ${fmtNs(d.maxSloadLatencyNs)}</div></div>
     <div class="bi"><div class="lbl">SSTOREs</div><div class="val">${fmt(d.totalSstores)}</div></div>
     <div class="bi"><div class="lbl">Accumulator</div><div class="val" style="color:var(--accum)">${fmt(d.accumulator)}</div>
-      <div class="sub">${aPct}% &middot; avg ${fmtUs(d.avgAccumUs)}</div></div>
+      <div class="sub">${aPct}% &middot; avg ${fmtNs(d.avgAccumNs)}</div></div>
     <div class="bi"><div class="lbl">Memtable</div><div class="val" style="color:var(--mem)">${fmt(d.memtable)}</div>
-      <div class="sub">${mPct}% &middot; avg ${fmtUs(d.avgMemtableUs)}</div></div>
+      <div class="sub">${mPct}% &middot; avg ${fmtNs(d.avgMemtableNs)}</div></div>
     <div class="bi"><div class="lbl">Block Cache</div><div class="val" style="color:var(--bcache)">${fmt(d.blockCache)}</div>
-      <div class="sub">${cPct}% &middot; avg ${fmtUs(d.avgBlockCacheUs)}</div></div>
+      <div class="sub">${cPct}% &middot; avg ${fmtNs(d.avgBlockCacheNs)}</div></div>
     <div class="bi"><div class="lbl">Disk</div><div class="val" style="color:var(--disk)">${fmt(d.disk)}</div>
-      <div class="sub">${dPct}% &middot; avg ${fmtUs(d.avgDiskUs)}</div></div>
+      <div class="sub">${dPct}% &middot; avg ${fmtNs(d.avgDiskNs)}</div></div>
     <div class="bi"><div class="lbl">Not Found</div><div class="val" style="color:var(--nf)">${fmt(d.notFound)}</div>
       <div class="sub">slot empty (value=0)</div></div>
     <div class="bi"><div class="lbl">Cold (EVM)</div><div class="val" style="color:var(--cold)">${fmt(d.coldSloads)}</div></div>
@@ -386,7 +392,7 @@ function renderBlockInfo(d) {
     const slowestOwner = slowest.contractName || slowest.address;
     const slowestMeta = `${slowest.storageType}${slowest.notFound ? ' · NOT FOUND' : ''} · tx ${slowest.txIndex}`;
     html += `<div class="bi"><div class="lbl">Slowest SLOAD</div>
-      <div class="val" style="color:var(--disk)">${fmtUs(slowest.latencyUs)}</div>
+      <div class="val" style="color:var(--disk)">${fmtNs(slowest.latencyNs)}</div>
       <div class="sub">${slowestOwner}</div>
       <div class="sub">${slowestMeta}</div>
       <div class="sub addr">${slowest.slot}</div></div>`;
@@ -409,9 +415,9 @@ function colDefs() {
     {key:'address', label:'Contract', type:'string'},
     {key:'contractName', label:'Name', type:'string'},
     {key:'total', label:'Total', type:'number'},
-    {key:'totalTimeUs', label:'Time', type:'time'},
-    {key:'maxTimeUs', label:'Max', type:'time'},
-    {key:'avgTimeUs', label:'Avg', type:'time'},
+    {key:'totalTimeNs', label:'Time', type:'time'},
+    {key:'maxTimeNs', label:'Max', type:'time'},
+    {key:'avgTimeNs', label:'Avg', type:'time'},
     {key:'accumulator', label:'Accum', type:'number', color:'var(--accum)'},
     {key:'memtable', label:'Mem', type:'number', color:'var(--mem)'},
     {key:'blockCache', label:'Cache', type:'number', color:'var(--bcache)'},
@@ -466,7 +472,7 @@ function renderAccountTable() {
           <span class="pct-bar" style="background:var(--bcache);width:${cW}px"></span>
           <span class="pct-bar" style="background:var(--disk);width:${dW}px"></span></td>`;
       } else if (c.type === 'time') {
-        row += `<td>${fmtUs(a[c.key])}</td>`;
+        row += `<td>${fmtNs(a[c.key])}</td>`;
       } else {
         const val = a[c.key];
         const disp = typeof val === 'number' && c.label.includes('%') ? val + '%' : (val ?? '');
@@ -511,12 +517,13 @@ async function toggleSlots(row, address) {
       const stClass = layerBadgeClass(st);
       const evmClass = s.cold ? 'cold' : 'warm';
       const nfBadge = s.notFound ? '<span class="badge nf">NOT FOUND</span>' : '<span class="badge bcache">FOUND</span>';
-      const latColor = s.latencyUs > 100 ? 'color:var(--disk)' : (s.latencyUs > 10 ? 'color:var(--mem)' : '');
+      const latNs = s.latencyNs || 0;
+      const latColor = latNs > 100000 ? 'color:var(--disk)' : (latNs > 10000 ? 'color:var(--mem)' : (latNs > 1000 ? 'color:var(--accent)' : ''));
       const deltas = `mH:${s.dMemHit||0} mM:${s.dMemMiss||0} cH:${s.dCacheHit||0} cM:${s.dCacheMiss||0}`;
       return `<tr><td style="color:var(--muted)">${i+1}</td>
         <td class="addr">${s.slot}</td>
         <td><span class="badge ${stClass}">${st}</span></td>
-        <td style="font-weight:700;${latColor}">${fmtUs(s.latencyUs)}</td>
+        <td style="font-weight:700;${latColor}">${fmtNs(latNs)}</td>
         <td>${nfBadge}</td>
         <td><span class="badge ${evmClass}">${s.cold?'COLD':'WARM'}</span></td>
         <td>${s.txIndex}</td>
@@ -544,8 +551,8 @@ async function loadRecent() {
         <td>${b.txCount}</td>
         <td>${fmtGas(b.gasUsed)} <span style="color:var(--muted);font-size:10px">(${b.gasUsedPercent}%)</span></td>
         <td>${b.totalSloads}</td>
-        <td>${fmtUs(b.totalSloadTimeUs)}</td>
-        <td>${fmtUs(b.maxSloadLatencyUs)}</td>
+        <td>${fmtNs(b.totalSloadTimeNs)}</td>
+        <td>${fmtNs(b.maxSloadLatencyNs)}</td>
         <td>${b.totalSstores}</td>
         <td style="color:var(--accum)">${b.accumulator}</td>
         <td style="color:var(--mem)">${b.memtable}</td>

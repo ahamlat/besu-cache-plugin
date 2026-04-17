@@ -140,12 +140,12 @@ public class CacheAnalysisRpcMethods {
       response.put("blockMemtableHit", r.blockMemtableHit());
     }
     response.put("rocksdbStats", r.rocksdbStatsAvailable());
-    response.put("totalSloadTimeUs", r.totalSloadTimeUs());
-    response.put("maxSloadLatencyUs", r.maxSloadLatencyUs());
-    response.put("avgAccumUs", r.avgAccumUs());
-    response.put("avgMemtableUs", r.avgMemtableUs());
-    response.put("avgBlockCacheUs", r.avgBlockCacheUs());
-    response.put("avgDiskUs", r.avgDiskUs());
+    response.put("totalSloadTimeNs", r.totalSloadTimeNs());
+    response.put("maxSloadLatencyNs", r.maxSloadLatencyNs());
+    response.put("avgAccumNs", r.avgAccumNs());
+    response.put("avgMemtableNs", r.avgMemtableNs());
+    response.put("avgBlockCacheNs", r.avgBlockCacheNs());
+    response.put("avgDiskNs", r.avgDiskNs());
     response.put("uniqueSlots", r.uniqueSlots());
     Map<String, Object> slowest = serializeSload(r.slowestSload());
     if (slowest != null) {
@@ -172,9 +172,9 @@ public class CacheAnalysisRpcMethods {
       acc.put("warm", a.warmReads());
       acc.put("coldPercent", Math.round(a.coldPercent() * 10.0) / 10.0);
       acc.put("warmPercent", Math.round(a.warmPercent() * 10.0) / 10.0);
-      acc.put("totalTimeUs", a.totalTimeUs());
-      acc.put("maxTimeUs", a.maxTimeUs());
-      acc.put("avgTimeUs", a.avgTimeUs());
+      acc.put("totalTimeNs", a.totalTimeNs());
+      acc.put("maxTimeNs", a.maxTimeNs());
+      acc.put("avgTimeNs", a.avgTimeNs());
       accounts.add(acc);
     }
     response.put("accounts", accounts);
@@ -195,8 +195,8 @@ public class CacheAnalysisRpcMethods {
     entry.put("coldSloads", r.coldSloads());
     entry.put("warmSloads", r.warmSloads());
     entry.put("contracts", r.accountStats().size());
-    entry.put("totalSloadTimeUs", r.totalSloadTimeUs());
-    entry.put("maxSloadLatencyUs", r.maxSloadLatencyUs());
+    entry.put("totalSloadTimeNs", r.totalSloadTimeNs());
+    entry.put("maxSloadLatencyNs", r.maxSloadLatencyNs());
     addMetadata(entry, r.metadata());
     if (r.rocksdbStatsAvailable()) {
       entry.put("blockDataCacheHit", r.blockDataCacheHit());
@@ -220,7 +220,7 @@ public class CacheAnalysisRpcMethods {
     entry.put("storageType", r.storageType());
     entry.put("notFound", r.notFound());
     entry.put("txIndex", r.transactionIndex());
-    entry.put("latencyUs", r.latencyUs());
+    entry.put("latencyNs", r.latencyNs());
     entry.put("dMemHit", r.dMemHit());
     entry.put("dMemMiss", r.dMemMiss());
     entry.put("dCacheHit", r.dCacheHit());

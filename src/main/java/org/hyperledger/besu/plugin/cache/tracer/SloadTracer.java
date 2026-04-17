@@ -139,7 +139,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
   @Override
   public void tracePostExecution(final MessageFrame frame, final OperationResult operationResult) {
     if (pendingAddress != null) {
-      long latencyUs = (System.nanoTime() - preSloadNanos) / 1_000;
+      long latencyNs = System.nanoTime() - preSloadNanos;
       long gasCost = operationResult.getGasCost();
       boolean isCold = gasCost > 200;
 
@@ -160,7 +160,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
       boolean notFound = loadedValue.isZero();
 
       sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType, notFound,
-          latencyUs, dMemHit, dMemMiss, dCacheHit, dCacheMiss));
+          latencyNs, dMemHit, dMemMiss, dCacheHit, dCacheMiss));
       nameResolver.enqueue(pendingAddress);
 
       pendingAddress = null;

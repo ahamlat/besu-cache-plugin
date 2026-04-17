@@ -13,7 +13,9 @@ import org.apache.tuweni.units.bigints.UInt256;
  *   BLOCK_CACHE (served from RocksDB block cache),
  *   DISK (read from SST files on disk)
  * @param notFound true when the loaded value is zero (slot empty / not in state)
- * @param latencyUs wall-clock microseconds for this SLOAD (pre- to post-execution)
+ * @param latencyNs wall-clock nanoseconds for this SLOAD (pre- to post-execution).
+ *   Stored as raw {@code System.nanoTime()} delta to preserve sub-microsecond
+ *   resolution for fast paths (accumulator hits are typically a few hundred ns).
  * @param dMemHit raw MEMTABLE_HIT ticker delta during this SLOAD
  * @param dMemMiss raw MEMTABLE_MISS ticker delta during this SLOAD
  * @param dCacheHit raw BLOCK_CACHE_DATA_HIT ticker delta during this SLOAD
@@ -26,7 +28,7 @@ public record SloadRecord(
     int transactionIndex,
     String storageType,
     boolean notFound,
-    long latencyUs,
+    long latencyNs,
     long dMemHit,
     long dMemMiss,
     long dCacheHit,

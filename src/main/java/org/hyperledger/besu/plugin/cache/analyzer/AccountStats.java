@@ -12,8 +12,8 @@ public record AccountStats(
     int blockCache,
     int disk,
     int notFound,
-    long totalTimeUs,
-    long maxTimeUs) {
+    long totalTimeNs,
+    long maxTimeNs) {
 
   public double coldPercent() {
     return totalReads > 0 ? coldReads * 100.0 / totalReads : 0;
@@ -43,7 +43,7 @@ public record AccountStats(
     return totalReads > 0 ? notFound * 100.0 / totalReads : 0;
   }
 
-  public long avgTimeUs() {
-    return totalReads > 0 ? totalTimeUs / totalReads : 0;
+  public long avgTimeNs() {
+    return totalReads > 0 ? totalTimeNs / totalReads : 0;
   }
 }

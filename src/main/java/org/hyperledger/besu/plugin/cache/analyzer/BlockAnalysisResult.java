@@ -13,6 +13,9 @@ import java.util.Set;
 /**
  * Complete SLOAD analysis for a single block, including block metadata
  * and RocksDB cache statistics.
+ *
+ * <p>All SLOAD timings are stored in nanoseconds to preserve resolution for
+ * fast paths (accumulator hits are typically a few hundred ns).
  */
 public record BlockAnalysisResult(
     long blockNumber,
@@ -35,12 +38,12 @@ public record BlockAnalysisResult(
     long blockMemtableHit,
     boolean rocksdbStatsAvailable,
     BlockMetadata metadata,
-    long totalSloadTimeUs,
-    long maxSloadLatencyUs,
-    long avgAccumUs,
-    long avgMemtableUs,
-    long avgBlockCacheUs,
-    long avgDiskUs,
+    long totalSloadTimeNs,
+    long maxSloadLatencyNs,
+    long avgAccumNs,
+    long avgMemtableNs,
+    long avgBlockCacheNs,
+    long avgDiskNs,
     int uniqueSlots) {
 
   public double coldPercent() {
@@ -54,7 +57,7 @@ public record BlockAnalysisResult(
   public SloadRecord slowestSload() {
     SloadRecord slowest = null;
     for (SloadRecord sload : sloads) {
-      if (slowest == null || sload.latencyUs() > slowest.latencyUs()) {
+      if (slowest == null || sload.latencyNs() > slowest.latencyNs()) {
         slowest = sload;
       }
     }
@@ -69,8 +72,8 @@ public record BlockAnalysisResult(
         accumulator, memtable, blockCache, disk, notFound,
         blockDataCacheHit, blockDataCacheMiss, blockMemtableHit,
         rocksdbStatsAvailable, newMetadata,
-        totalSloadTimeUs, maxSloadLatencyUs,
-        avgAccumUs, avgMemtableUs, avgBlockCacheUs, avgDiskUs, uniqueSlots);
+        totalSloadTimeNs, maxSloadLatencyNs,
+        avgAccumNs, avgMemtableNs, avgBlockCacheNs, avgDiskNs, uniqueSlots);
   }
 
   public static BlockAnalysisResult build(
@@ -87,10 +90,10 @@ public record BlockAnalysisResult(
 
     int cold = 0, warm = 0;
     int totalAccum = 0, totalMem = 0, totalBCache = 0, totalDisk = 0, totalNf = 0;
-    long totalTimeUs = 0, maxLatencyUs = 0;
+    long totalTimeNs = 0, maxLatencyNs = 0;
     long accumTimeSum = 0, memTimeSum = 0, bCacheTimeSum = 0, diskTimeSum = 0;
 
-    // perAccount: [cold, warm, accum, mem, bcache, disk, nf, totalTimeUs, maxTimeUs]
+    // perAccount: [cold, warm, accum, mem, bcache, disk, nf, totalTimeNs, maxTimeNs]
     Map<String, long[]> perAccount = new LinkedHashMap<>();
     Set<String> uniqueSlotKeys = new HashSet<>();
 
@@ -102,35 +105,35 @@ public record BlockAnalysisResult(
       if (r.isCold()) { cold++; counts[0]++; } else { warm++; counts[1]++; }
 
       switch (r.storageType()) {
-        case "ACCUMULATOR" -> { totalAccum++; counts[2]++; accumTimeSum += r.latencyUs(); }
+        case "ACCUMULATOR" -> { totalAccum++; counts[2]++; accumTimeSum += r.latencyNs(); }
         case "MEMTABLE"    -> {
           totalMem++;
           counts[3]++;
-          memTimeSum += r.latencyUs();
+          memTimeSum += r.latencyNs();
           uniqueSlotKeys.add(slotId);
         }
         case "BLOCK_CACHE" -> {
           totalBCache++;
           counts[4]++;
-          bCacheTimeSum += r.latencyUs();
+          bCacheTimeSum += r.latencyNs();
           uniqueSlotKeys.add(slotId);
         }
         case "DISK"        -> {
           totalDisk++;
           counts[5]++;
-          diskTimeSum += r.latencyUs();
+          diskTimeSum += r.latencyNs();
           uniqueSlotKeys.add(slotId);
         }
-        default            -> { totalAccum++; counts[2]++; accumTimeSum += r.latencyUs(); }
+        default            -> { totalAccum++; counts[2]++; accumTimeSum += r.latencyNs(); }
       }
 
       if (r.notFound()) { totalNf++; counts[6]++; }
 
-      totalTimeUs += r.latencyUs();
-      if (r.latencyUs() > maxLatencyUs) maxLatencyUs = r.latencyUs();
+      totalTimeNs += r.latencyNs();
+      if (r.latencyNs() > maxLatencyNs) maxLatencyNs = r.latencyNs();
 
-      counts[7] += r.latencyUs();
-      if (r.latencyUs() > counts[8]) counts[8] = r.latencyUs();
+      counts[7] += r.latencyNs();
+      if (r.latencyNs() > counts[8]) counts[8] = r.latencyNs();
     }
 
     long avgAccum = totalAccum > 0 ? accumTimeSum / totalAccum : 0;
@@ -159,7 +162,7 @@ public record BlockAnalysisResult(
         blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit(),
         rocksdbStatsAvailable,
         metadata,
-        totalTimeUs, maxLatencyUs,
+        totalTimeNs, maxLatencyNs,
         avgAccum, avgMem, avgBCache, avgDisk,
         uniqueSlotKeys.size());
   }
