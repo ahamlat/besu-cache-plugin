@@ -174,6 +174,10 @@ public class WebUiServer {
     entry.put("contracts", r.accountStats().size());
     entry.put("totalSloadTimeNs", r.totalSloadTimeNs());
     entry.put("maxSloadLatencyNs", r.maxSloadLatencyNs());
+    entry.put("avgAccumNs", r.avgAccumNs());
+    entry.put("avgMemtableNs", r.avgMemtableNs());
+    entry.put("avgBlockCacheNs", r.avgBlockCacheNs());
+    entry.put("avgDiskNs", r.avgDiskNs());
     addMetadata(entry, r.metadata());
     if (r.rocksdbStatsAvailable()) {
       entry.put("blockDataCacheHit", r.blockDataCacheHit());
