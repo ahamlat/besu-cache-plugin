@@ -19,9 +19,7 @@ import org.hyperledger.besu.plugin.data.ProcessableBlockHeader;
 import org.hyperledger.besu.plugin.services.tracer.BlockAwareOperationTracer;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -30,14 +28,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Captures every SLOAD during block execution and classifies each as:
+ * Captures every SLOAD during block execution and classifies each by:
  * <ul>
  *   <li>EVM-level: warm/cold (based on gas cost, EIP-2929)</li>
- *   <li>Storage-level: CACHED / NOT_FOUND / STORAGE_READ</li>
+ *   <li>Storage layer: ACCUMULATOR / MEMTABLE / BLOCK_CACHE / DISK
+ *       (determined by RocksDB ticker deltas bracketing each SLOAD)</li>
  * </ul>
  *
- * Captures block metadata and measures wall-clock EVM execution time.
- * Stores pending nanos so the BlockAddedListener can compute state-root time.
+ * When RocksDB stats are unavailable, falls back to a heuristic classification.
  */
 public class SloadTracer implements BlockAwareOperationTracer {
 
@@ -56,10 +54,10 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private int currentTxCount;
   private int txIndex = -1;
   private final List<SloadRecord> sloads = new ArrayList<>();
-  private final Set<SlotKey> seenSlots = new HashSet<>();
 
   private Address pendingAddress;
   private UInt256 pendingSlot;
+  private RocksDBStatsProvider.MiniSnapshot preSloadSnapshot;
   private int sstoreCount;
 
   private RocksDBStatsProvider.Snapshot blockStartSnapshot;
@@ -67,10 +65,6 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private long currentGasLimit;
   private long currentBaseFeeWei;
 
-  /**
-   * @param pendingTimings shared map where traceEndBlock stores [blockStartNanos, blockEndNanos]
-   *                       keyed by block number, for the BlockAddedListener to consume.
-   */
   public SloadTracer(
       final BlockResultStore store,
       final ContractNameResolver nameResolver,
@@ -106,10 +100,10 @@ public class SloadTracer implements BlockAwareOperationTracer {
   private void resetBlock(final long blockNum, final String blockHash, final long timestamp,
       final long gasLimit, final long baseFeeWei) {
     sloads.clear();
-    seenSlots.clear();
     txIndex = -1;
     pendingAddress = null;
     pendingSlot = null;
+    preSloadSnapshot = null;
     sstoreCount = 0;
     currentBlockNumber = blockNum;
     currentBlockHash = blockHash;
@@ -134,6 +128,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
       pendingAddress = frame.getRecipientAddress();
       Bytes raw = frame.getStackItem(0);
       pendingSlot = UInt256.fromBytes(raw);
+      preSloadSnapshot = statsProvider.miniSnapshot();
     } else if (opcode == SSTORE_OPCODE) {
       sstoreCount++;
     }
@@ -145,15 +140,12 @@ public class SloadTracer implements BlockAwareOperationTracer {
       long gasCost = operationResult.getGasCost();
       boolean isCold = gasCost > 200;
 
-      SlotKey key = new SlotKey(pendingAddress, pendingSlot);
       String storageType;
-
-      if (!seenSlots.add(key)) {
-        storageType = "CACHED";
+      if (statsProvider.isAvailable()) {
+        RocksDBStatsProvider.MiniSnapshot postSnapshot = statsProvider.miniSnapshot();
+        storageType = postSnapshot.classifyLayer(preSloadSnapshot);
       } else {
-        Bytes loadedValue = frame.getStackItem(0);
-        boolean isZero = loadedValue.isZero();
-        storageType = isZero ? "NOT_FOUND" : "STORAGE_READ";
+        storageType = "ACCUMULATOR";
       }
 
       sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType));
@@ -161,6 +153,7 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
       pendingAddress = null;
       pendingSlot = null;
+      preSloadSnapshot = null;
     }
   }
 
@@ -206,12 +199,11 @@ public class SloadTracer implements BlockAwareOperationTracer {
 
     pendingTimings.put(currentBlockNumber, new long[]{blockStartNanos, blockEndNanos});
 
-    LOG.info("Block {} EVM done in {}ms: {} SLOADs {} SSTOREs ({} read, {} notfound, {} cached) "
+    LOG.info("Block {} EVM done in {}ms: {} SLOADs {} SSTOREs "
+            + "({} accum, {} memtable, {} cache, {} disk) "
             + "gas {}/{} across {} contracts",
         currentBlockNumber, evmExecutionMs, result.totalSloads(), sstoreCount,
-        result.storageReads(), result.notFound(), result.cached(),
+        result.accumulator(), result.memtable(), result.blockCache(), result.disk(),
         gasUsed, currentGasLimit, result.accountStats().size());
   }
-
-  private record SlotKey(Address address, UInt256 slot) {}
 }

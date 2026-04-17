@@ -7,8 +7,8 @@
 <style>
   :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3;
           --muted: #8b949e; --accent: #58a6ff; --cold: #f85149; --warm: #3fb950;
-          --read: #58a6ff; --nf: #f0883e; --cached: #8b949e;
-          --hit: #3fb950; --miss: #f85149; --mem: #d29922; }
+          --accum: #8b949e; --mem: #d29922; --bcache: #3fb950; --disk: #f85149;
+          --hit: #3fb950; --miss: #f85149; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
          background: var(--bg); color: var(--text); padding: 16px 20px; font-size: 13px; }
@@ -37,6 +37,18 @@
   .time-bar .evm { background: var(--accent); }
   .time-bar .sr { background: var(--mem); }
 
+  .pie-row { display: flex; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+  .pie-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+              padding: 12px 16px; display: flex; align-items: center; gap: 16px; min-width: 280px; flex: 1; }
+  .pie-card .pie-title { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                         letter-spacing: 0.4px; margin-bottom: 6px; }
+  .pie-svg { flex-shrink: 0; }
+  .pie-legend { display: flex; flex-direction: column; gap: 3px; }
+  .pie-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .pie-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .pie-legend-val { font-weight: 700; min-width: 36px; text-align: right; }
+  .pie-legend-pct { color: var(--muted); font-size: 10px; min-width: 40px; }
+
   table { width: 100%; border-collapse: collapse; background: var(--surface);
           border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
   th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -56,9 +68,10 @@
   .hidden { display: none; }
   .badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px;
            font-weight: 600; text-transform: uppercase; }
-  .badge.read { background: rgba(88,166,255,0.15); color: var(--read); }
-  .badge.nf { background: rgba(240,136,62,0.15); color: var(--nf); }
-  .badge.cached { background: rgba(139,148,158,0.15); color: var(--cached); }
+  .badge.accum { background: rgba(139,148,158,0.15); color: var(--accum); }
+  .badge.memtable { background: rgba(210,153,34,0.15); color: var(--mem); }
+  .badge.bcache { background: rgba(63,185,80,0.15); color: var(--bcache); }
+  .badge.disk { background: rgba(248,81,73,0.15); color: var(--disk); }
   .badge.cold { background: rgba(248,81,73,0.15); color: var(--cold); }
   .badge.warm { background: rgba(63,185,80,0.15); color: var(--warm); }
   .loading { color: var(--muted); font-style: italic; padding: 12px; }
@@ -73,10 +86,11 @@
   <button id="autoBtn" onclick="toggleAuto()">Auto-refresh: OFF</button>
   <select id="sortSelect" onchange="sortCol=this.value;renderAccountTable()">
     <option value="total">Sort: Total</option>
-    <option value="storageReads">Sort: Reads</option>
-    <option value="notFound">Sort: NotFound</option>
-    <option value="cached">Sort: Cached</option>
-    <option value="notFoundPercent">Sort: NF%</option>
+    <option value="accumulator">Sort: Accum</option>
+    <option value="memtable">Sort: Memtable</option>
+    <option value="blockCache">Sort: Cache</option>
+    <option value="disk">Sort: Disk</option>
+    <option value="diskPercent">Sort: Disk%</option>
     <option value="cold">Sort: Cold</option>
     <option value="contractName">Sort: Name</option>
   </select>
@@ -84,6 +98,7 @@
 </div>
 
 <div id="blockInfo" class="block-info hidden"></div>
+<div id="pieRow" class="pie-row hidden"></div>
 
 <div id="accountSection" class="hidden">
   <div class="section-title">Per-Contract Breakdown</div>
@@ -97,7 +112,7 @@
 <table class="recent-table" id="recentTable">
   <thead>
     <tr><th>Block</th><th>Total</th><th>EVM</th><th>Root</th><th>MGas/s</th><th>Txs</th><th>Gas</th><th>SLOADs</th><th>SSTOREs</th>
-        <th>Read</th><th>NotFnd</th><th>Cached</th>
+        <th>Accum</th><th>Mem</th><th>Cache</th><th>Disk</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
   <tbody id="recentBody"></tbody>
@@ -153,6 +168,99 @@ function timeColor(ms) {
   return (ms && ms > 500) ? 'var(--miss)' : '';
 }
 
+function layerBadgeClass(type) {
+  switch(type) {
+    case 'ACCUMULATOR': return 'accum';
+    case 'MEMTABLE': return 'memtable';
+    case 'BLOCK_CACHE': return 'bcache';
+    case 'DISK': return 'disk';
+    default: return 'accum';
+  }
+}
+
+/* ---- SVG Donut Pie Chart ---- */
+const PIE_R = 40, PIE_CX = 50, PIE_CY = 50, PIE_CIRC = 2 * Math.PI * PIE_R;
+
+function donutSvg(slices, size) {
+  const sz = size || 100;
+  let paths = '';
+  let offset = 0;
+  for (const s of slices) {
+    if (s.pct <= 0) continue;
+    const dash = PIE_CIRC * s.pct / 100;
+    const gap = PIE_CIRC - dash;
+    paths += `<circle cx="${PIE_CX}" cy="${PIE_CY}" r="${PIE_R}" fill="none"
+      stroke="${s.color}" stroke-width="14"
+      stroke-dasharray="${dash} ${gap}"
+      stroke-dashoffset="${-offset}"
+      transform="rotate(-90 ${PIE_CX} ${PIE_CY})"/>`;
+    offset += dash;
+  }
+  if (offset === 0) {
+    paths = `<circle cx="${PIE_CX}" cy="${PIE_CY}" r="${PIE_R}" fill="none"
+      stroke="#30363d" stroke-width="14"/>`;
+  }
+  return `<svg class="pie-svg" width="${sz}" height="${sz}" viewBox="0 0 100 100">${paths}</svg>`;
+}
+
+function legendHtml(items) {
+  return items.map(it =>
+    `<div class="pie-legend-item">
+      <span class="pie-legend-dot" style="background:${it.color}"></span>
+      <span class="pie-legend-val">${fmt(it.value)}</span>
+      <span class="pie-legend-pct">${it.pct.toFixed(1)}%</span>
+      <span>${it.label}</span>
+    </div>`
+  ).join('');
+}
+
+function buildPieCard(title, slices) {
+  return `<div class="pie-card">
+    <div>
+      <div class="pie-title">${title}</div>
+      ${donutSvg(slices, 96)}
+    </div>
+    <div class="pie-legend">${legendHtml(slices)}</div>
+  </div>`;
+}
+
+function renderPieCharts(d) {
+  const el = document.getElementById('pieRow');
+
+  const evmMs = d.evmExecutionMs || 0;
+  const srMs = d.stateRootMs || 0;
+  const hasSr = d.totalBlockMs && d.totalBlockMs > 0;
+  const timeTotal = hasSr ? (evmMs + srMs) : evmMs;
+  const timePie = hasSr
+    ? [
+        {label:'EVM', value:evmMs, pct: timeTotal>0 ? evmMs/timeTotal*100 : 100, color:'#58a6ff'},
+        {label:'State Root', value:srMs, pct: timeTotal>0 ? srMs/timeTotal*100 : 0, color:'#d29922'}
+      ]
+    : [
+        {label:'EVM', value:evmMs, pct:100, color:'#58a6ff'}
+      ];
+
+  const total = d.totalSloads || 1;
+  const layerPie = [
+    {label:'Accumulator', value:d.accumulator||0, pct:(d.accumulator||0)/total*100, color:'#8b949e'},
+    {label:'Memtable',    value:d.memtable||0,    pct:(d.memtable||0)/total*100,    color:'#d29922'},
+    {label:'Block Cache', value:d.blockCache||0,   pct:(d.blockCache||0)/total*100,  color:'#3fb950'},
+    {label:'Disk',        value:d.disk||0,         pct:(d.disk||0)/total*100,        color:'#f85149'}
+  ];
+
+  const coldWarmPie = [
+    {label:'Cold', value:d.coldSloads||0, pct:(d.coldSloads||0)/total*100, color:'#f85149'},
+    {label:'Warm', value:d.warmSloads||0, pct:(d.warmSloads||0)/total*100, color:'#3fb950'}
+  ];
+
+  let html = buildPieCard('Block Time', timePie);
+  html += buildPieCard('Storage Layer', layerPie);
+  html += buildPieCard('EVM Access (EIP-2929)', coldWarmPie);
+
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
 async function loadBlock() {
   const val = document.getElementById('blockInput').value.trim() || 'latest';
   try {
@@ -160,6 +268,7 @@ async function loadBlock() {
     if (data.error) { alert(data.error); return; }
     currentData = data;
     renderBlockInfo(data);
+    renderPieCharts(data);
     renderAccountTable();
     document.getElementById('blockInfo').classList.remove('hidden');
     document.getElementById('accountSection').classList.remove('hidden');
@@ -170,7 +279,6 @@ async function loadBlock() {
 
 function renderBlockInfo(d) {
   const el = document.getElementById('blockInfo');
-  const uniqueSlots = d.storageReads + d.notFound;
   const gasP = d.gasUsedPercent || 0;
   const hasRdb = d.rocksdbStats;
 
@@ -184,6 +292,12 @@ function renderBlockInfo(d) {
   const hasSrTiming = d.totalBlockMs && d.totalBlockMs > 0;
   const evmPct = hasSrTiming && totalMs > 0 ? (evmMs / totalMs * 100) : 100;
   const srPct = hasSrTiming && totalMs > 0 ? (srMs / totalMs * 100) : 0;
+
+  const total = d.totalSloads || 1;
+  const aPct = ((d.accumulator||0)/total*100).toFixed(1);
+  const mPct = ((d.memtable||0)/total*100).toFixed(1);
+  const cPct = ((d.blockCache||0)/total*100).toFixed(1);
+  const dPct = ((d.disk||0)/total*100).toFixed(1);
 
   let html = `
     <div class="bi"><div class="lbl">Block</div><div class="val">${fmt(d.blockNumber)}</div></div>
@@ -208,21 +322,22 @@ function renderBlockInfo(d) {
   }
 
   html += `
-    <div class="bi"><div class="lbl">SLOADs</div><div class="val">${fmt(d.totalSloads)}</div>
-      <div class="sub">${uniqueSlots} unique slots</div></div>
+    <div class="bi"><div class="lbl">SLOADs</div><div class="val">${fmt(d.totalSloads)}</div></div>
     <div class="bi"><div class="lbl">SSTOREs</div><div class="val">${fmt(d.totalSstores)}</div></div>
-    <div class="bi"><div class="lbl">Storage Read</div><div class="val" style="color:var(--read)">${fmt(d.storageReads)}</div>
-      <div class="sub">1st read, value found</div></div>
-    <div class="bi"><div class="lbl">Not Found</div><div class="val" style="color:var(--nf)">${fmt(d.notFound)}</div>
-      <div class="sub">1st read, slot empty</div></div>
-    <div class="bi"><div class="lbl">Cached</div><div class="val" style="color:var(--cached)">${fmt(d.cached)}</div>
-      <div class="sub">repeat read in block</div></div>
+    <div class="bi"><div class="lbl">Accumulator</div><div class="val" style="color:var(--accum)">${fmt(d.accumulator)}</div>
+      <div class="sub">${aPct}% &middot; in-memory cache</div></div>
+    <div class="bi"><div class="lbl">Memtable</div><div class="val" style="color:var(--mem)">${fmt(d.memtable)}</div>
+      <div class="sub">${mPct}% &middot; RocksDB write buffer</div></div>
+    <div class="bi"><div class="lbl">Block Cache</div><div class="val" style="color:var(--bcache)">${fmt(d.blockCache)}</div>
+      <div class="sub">${cPct}% &middot; RocksDB block cache</div></div>
+    <div class="bi"><div class="lbl">Disk</div><div class="val" style="color:var(--disk)">${fmt(d.disk)}</div>
+      <div class="sub">${dPct}% &middot; SST file read</div></div>
     <div class="bi"><div class="lbl">Cold (EVM)</div><div class="val" style="color:var(--cold)">${fmt(d.coldSloads)}</div></div>
     <div class="bi"><div class="lbl">Warm (EVM)</div><div class="val" style="color:var(--warm)">${fmt(d.warmSloads)}</div></div>
     <div class="bi"><div class="lbl">Contracts</div><div class="val">${d.accounts.length}</div></div>`;
 
   if (hasRdb) {
-    html += `<div class="bi"><div class="lbl">RocksDB Block</div>
+    html += `<div class="bi"><div class="lbl">RocksDB Block Totals</div>
       <div class="sub" style="margin-top:3px">
         <span style="color:var(--hit)">Hit ${fmt(d.blockDataCacheHit)}</span>&ensp;
         <span style="color:var(--miss)">Miss ${fmt(d.blockDataCacheMiss)}</span>&ensp;
@@ -238,15 +353,16 @@ function colDefs() {
     {key:'address', label:'Contract', type:'string'},
     {key:'contractName', label:'Name', type:'string'},
     {key:'total', label:'Total', type:'number'},
-    {key:'storageReads', label:'Read', type:'number', color:'var(--read)'},
-    {key:'notFound', label:'NotFnd', type:'number', color:'var(--nf)'},
-    {key:'cached', label:'Cached', type:'number', color:'var(--cached)'},
-    {key:'storageReadPercent', label:'Rd%', type:'number'},
-    {key:'notFoundPercent', label:'NF%', type:'number'},
-    {key:'cachedPercent', label:'Cch%', type:'number'},
+    {key:'accumulator', label:'Accum', type:'number', color:'var(--accum)'},
+    {key:'memtable', label:'Mem', type:'number', color:'var(--mem)'},
+    {key:'blockCache', label:'Cache', type:'number', color:'var(--bcache)'},
+    {key:'disk', label:'Disk', type:'number', color:'var(--disk)'},
+    {key:'accumulatorPercent', label:'Acc%', type:'number'},
+    {key:'memtablePercent', label:'Mem%', type:'number'},
+    {key:'blockCachePercent', label:'Cch%', type:'number'},
+    {key:'diskPercent', label:'Dsk%', type:'number'},
     {key:'cold', label:'Cold', type:'number', color:'var(--cold)'},
     {key:'warm', label:'Warm', type:'number', color:'var(--warm)'},
-    {key:'coldPercent', label:'Cold%', type:'number'},
     {key:'bar', label:'', type:'bar'}
   ];
 }
@@ -279,12 +395,15 @@ function renderAccountTable() {
     for (let i = 3; i < cols.length; i++) {
       const c = cols[i];
       if (c.type === 'bar') {
-        const rdW = Math.max(1, (a.storageReadPercent||0) * 0.5);
-        const nfW = Math.max(1, (a.notFoundPercent||0) * 0.5);
-        const ccW = Math.max(1, (a.cachedPercent||0) * 0.5);
-        row += `<td><span class="pct-bar" style="background:var(--read);width:${rdW}px"></span>
-          <span class="pct-bar" style="background:var(--nf);width:${nfW}px"></span>
-          <span class="pct-bar" style="background:var(--cached);width:${ccW}px"></span></td>`;
+        const aW = Math.max(1, (a.accumulatorPercent||0) * 0.5);
+        const mW = Math.max(1, (a.memtablePercent||0) * 0.5);
+        const cW = Math.max(1, (a.blockCachePercent||0) * 0.5);
+        const dW = Math.max(1, (a.diskPercent||0) * 0.5);
+        row += `<td>
+          <span class="pct-bar" style="background:var(--accum);width:${aW}px"></span>
+          <span class="pct-bar" style="background:var(--mem);width:${mW}px"></span>
+          <span class="pct-bar" style="background:var(--bcache);width:${cW}px"></span>
+          <span class="pct-bar" style="background:var(--disk);width:${dW}px"></span></td>`;
       } else {
         const val = a[c.key];
         const disp = typeof val === 'number' && c.label.includes('%') ? val + '%' : (val ?? '');
@@ -323,10 +442,10 @@ async function toggleSlots(row, address) {
   const detail = document.createElement('tr');
   detail.className = 'slot-detail';
   detail.innerHTML = `<td colspan="${totalCols}"><table style="width:100%">
-    <thead><tr><th>#</th><th>Slot</th><th>Storage</th><th>EVM</th><th>Tx#</th></tr></thead><tbody>` +
+    <thead><tr><th>#</th><th>Slot</th><th>Layer</th><th>EVM</th><th>Tx#</th></tr></thead><tbody>` +
     data.sloads.map((s, i) => {
-      const st = s.storageType || 'UNKNOWN';
-      const stClass = st === 'STORAGE_READ' ? 'read' : st === 'NOT_FOUND' ? 'nf' : 'cached';
+      const st = s.storageType || 'ACCUMULATOR';
+      const stClass = layerBadgeClass(st);
       const evmClass = s.cold ? 'cold' : 'warm';
       return `<tr><td style="color:var(--muted)">${i+1}</td>
         <td class="addr">${s.slot}</td>
@@ -357,9 +476,10 @@ async function loadRecent() {
         <td>${fmtGas(b.gasUsed)} <span style="color:var(--muted);font-size:10px">(${b.gasUsedPercent}%)</span></td>
         <td>${b.totalSloads}</td>
         <td>${b.totalSstores}</td>
-        <td style="color:var(--read)">${b.storageReads}</td>
-        <td style="color:var(--nf)">${b.notFound}</td>
-        <td style="color:var(--cached)">${b.cached}</td>
+        <td style="color:var(--accum)">${b.accumulator}</td>
+        <td style="color:var(--mem)">${b.memtable}</td>
+        <td style="color:var(--bcache)">${b.blockCache}</td>
+        <td style="color:var(--disk)">${b.disk}</td>
         <td style="color:var(--cold)">${b.coldSloads}</td>
         <td style="color:var(--warm)">${b.warmSloads}</td>
         <td>${b.contracts}</td>

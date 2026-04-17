@@ -23,9 +23,10 @@ public record BlockAnalysisResult(
     int coldSloads,
     int warmSloads,
     List<AccountStats> accountStats,
-    int storageReads,
-    int notFound,
-    int cached,
+    int accumulator,
+    int memtable,
+    int blockCache,
+    int disk,
     long blockDataCacheHit,
     long blockDataCacheMiss,
     long blockMemtableHit,
@@ -41,7 +42,7 @@ public record BlockAnalysisResult(
     return new BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
         sloads, totalSloads, totalSstores, coldSloads, warmSloads, accountStats,
-        storageReads, notFound, cached,
+        accumulator, memtable, blockCache, disk,
         blockDataCacheHit, blockDataCacheMiss, blockMemtableHit,
         rocksdbStatsAvailable, newMetadata);
   }
@@ -59,18 +60,20 @@ public record BlockAnalysisResult(
       final BlockMetadata metadata) {
 
     int cold = 0, warm = 0;
-    int totalStorageRead = 0, totalNotFound = 0, totalCached = 0;
+    int totalAccum = 0, totalMem = 0, totalBCache = 0, totalDisk = 0;
     Map<String, int[]> perAccount = new LinkedHashMap<>();
 
     for (SloadRecord r : sloads) {
       String addr = r.contractAddress().toHexString().toLowerCase();
-      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[5]);
+      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[6]);
       if (r.isCold()) { cold++; counts[0]++; } else { warm++; counts[1]++; }
 
       switch (r.storageType()) {
-        case "STORAGE_READ" -> { totalStorageRead++; counts[2]++; }
-        case "NOT_FOUND" -> { totalNotFound++; counts[3]++; }
-        default -> { totalCached++; counts[4]++; }
+        case "ACCUMULATOR" -> { totalAccum++; counts[2]++; }
+        case "MEMTABLE"    -> { totalMem++;   counts[3]++; }
+        case "BLOCK_CACHE" -> { totalBCache++; counts[4]++; }
+        case "DISK"        -> { totalDisk++;  counts[5]++; }
+        default            -> { totalAccum++; counts[2]++; }
       }
     }
 
@@ -82,7 +85,7 @@ public record BlockAnalysisResult(
           entry.getKey(),
           name != null ? name : "",
           c[0] + c[1], c[0], c[1],
-          c[2], c[3], c[4]));
+          c[2], c[3], c[4], c[5]));
     }
     stats.sort(Comparator.comparingInt(AccountStats::totalReads).reversed());
 
@@ -90,7 +93,7 @@ public record BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
         List.copyOf(sloads), sloads.size(), totalSstores, cold, warm,
         List.copyOf(stats),
-        totalStorageRead, totalNotFound, totalCached,
+        totalAccum, totalMem, totalBCache, totalDisk,
         blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit(),
         rocksdbStatsAvailable,
         metadata);

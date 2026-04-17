@@ -13,10 +13,8 @@ import org.slf4j.LoggerFactory;
  * Accesses RocksDB Statistics via reflection to read block-cache ticker counters.
  * No compile-time dependency on internal Besu or RocksDB classes.
  *
- * <p>Reflection path:
- * ServiceManager → StorageService → getByName("rocksdb") →
- * RocksDBKeyValueStorageFactory.segmentedStorage →
- * RocksDBColumnarKeyValueStorage.stats → org.rocksdb.Statistics
+ * <p>Provides both full {@link Snapshot} (for block-level aggregates) and lightweight
+ * {@link MiniSnapshot} (for per-SLOAD layer classification with minimal overhead).
  */
 public class RocksDBStatsProvider {
 
@@ -91,6 +89,7 @@ public class RocksDBStatsProvider {
     return available;
   }
 
+  /** Full snapshot of all 5 tickers (used for block-level aggregates). */
   public Snapshot snapshot() {
     if (!available) return Snapshot.EMPTY;
     try {
@@ -102,6 +101,19 @@ public class RocksDBStatsProvider {
       return new Snapshot(dh, dm, mh, mm, bf);
     } catch (Exception e) {
       return Snapshot.EMPTY;
+    }
+  }
+
+  /** Lightweight snapshot of 3 tickers for per-SLOAD layer classification. */
+  public MiniSnapshot miniSnapshot() {
+    if (!available) return MiniSnapshot.EMPTY;
+    try {
+      long mh = (long) getTickerCountMethod.invoke(statistics, tickerMemtableHit);
+      long dh = (long) getTickerCountMethod.invoke(statistics, tickerDataHit);
+      long dm = (long) getTickerCountMethod.invoke(statistics, tickerDataMiss);
+      return new MiniSnapshot(mh, dh, dm);
+    } catch (Exception e) {
+      return MiniSnapshot.EMPTY;
     }
   }
 
@@ -119,23 +131,33 @@ public class RocksDBStatsProvider {
           memtableMiss - before.memtableMiss,
           bloomFilterUseful - before.bloomFilterUseful);
     }
+  }
+
+  /**
+   * Lightweight 3-ticker snapshot for bracketing individual SLOAD operations.
+   * Only captures the tickers needed to classify which RocksDB layer served the value.
+   */
+  public record MiniSnapshot(long memtableHit, long blockCacheHit, long blockCacheMiss) {
+    public static final MiniSnapshot EMPTY = new MiniSnapshot(0, 0, 0);
 
     /**
-     * Classify an SLOAD based on delta counters.
+     * Classify which storage layer served an SLOAD based on ticker deltas.
      * <ul>
-     *   <li>MEMTABLE: memtable was hit, no data block reads</li>
-     *   <li>HIT: at least one data block cache hit, no data block miss</li>
-     *   <li>MISS: at least one data block cache miss (had to read from SST)</li>
-     *   <li>NOT_FOUND: bloom filter rejected the lookup (key doesn't exist in DB)</li>
-     *   <li>ACCUMULATOR: no RocksDB activity at all (value from Bonsai accumulator)</li>
+     *   <li>ACCUMULATOR: all deltas 0 -- no RocksDB activity (value from in-memory accumulator)</li>
+     *   <li>MEMTABLE: memtableHit increased -- value found in RocksDB write buffer</li>
+     *   <li>BLOCK_CACHE: blockCacheHit increased, no memtable hit -- from RocksDB block cache</li>
+     *   <li>DISK: blockCacheMiss increased, no hits -- had to read SST files from disk</li>
      * </ul>
      */
-    public String classify() {
-      if (memtableHit > 0 && dataCacheHit == 0 && dataCacheMiss == 0) return "MEMTABLE";
-      if (dataCacheHit > 0 && dataCacheMiss == 0) return "HIT";
-      if (dataCacheMiss > 0) return "MISS";
-      if (bloomFilterUseful > 0) return "NOT_FOUND";
-      return "ACCUMULATOR";
+    public String classifyLayer(final MiniSnapshot before) {
+      long dMem = memtableHit - before.memtableHit;
+      long dHit = blockCacheHit - before.blockCacheHit;
+      long dMiss = blockCacheMiss - before.blockCacheMiss;
+
+      if (dMem == 0 && dHit == 0 && dMiss == 0) return "ACCUMULATOR";
+      if (dMem > 0) return "MEMTABLE";
+      if (dHit > 0) return "BLOCK_CACHE";
+      return "DISK";
     }
   }
 
