@@ -30,6 +30,10 @@ dependencies {
   compileOnly 'io.vertx:vertx-web'
   compileOnly 'com.fasterxml.jackson.core:jackson-databind'
   compileOnly 'com.fasterxml.jackson.core:jackson-annotations'
+  // rocksdbjni ships with Besu at runtime; compileOnly lets us call
+  // Statistics.getTickerCount(TickerType) directly (no reflection / itable stub)
+  // on the per-SLOAD hot path. Version pinned to match Besu 26.2.0.
+  compileOnly 'org.rocksdb:rocksdbjni:10.6.2'
 }
 
 jar {

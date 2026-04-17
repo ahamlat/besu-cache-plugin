@@ -4,29 +4,31 @@ import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.services.StorageService;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 
+import org.rocksdb.Statistics;
+import org.rocksdb.TickerType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Accesses RocksDB Statistics via reflection to read block-cache ticker counters.
- * No compile-time dependency on internal Besu or RocksDB classes.
+ * Reads RocksDB {@link Statistics} tickers that quantify where each get() was served:
+ * memtable, block cache or SST disk read.
  *
- * <p>Provides both full {@link Snapshot} (for block-level aggregates) and lightweight
- * {@link MiniSnapshot} (for per-SLOAD layer classification with minimal overhead).
+ * <p>Reflection is used only at {@link #init} time to fish the private {@code Statistics}
+ * instance out of Besu's {@code RocksDBColumnarKeyValueStorage}. From then on, every
+ * per-SLOAD call goes through direct typed {@link Statistics#getTickerCount(TickerType)}
+ * invocations - no {@link java.lang.reflect.Method#invoke}, no {@code LambdaForm}, no
+ * {@code itable stub} on the hot path. JIT can inline these down to a JNI volatile read.
+ *
+ * <p>Two snapshots are exposed: {@link Snapshot} (5 tickers, for block-level aggregates)
+ * and {@link MiniSnapshot} (4 tickers, bracketing individual SLOADs for layer classification).
  */
 public class RocksDBStatsProvider {
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBStatsProvider.class);
 
-  private Object statistics;
-  private Method getTickerCountMethod;
-  private Object tickerDataHit;
-  private Object tickerDataMiss;
-  private Object tickerMemtableHit;
-  private Object tickerMemtableMiss;
-  private Object tickerBloomUseful;
+  // Cached on init so the hot path does a plain invokevirtual on a Statistics reference.
+  private Statistics statistics;
   private boolean available;
 
   public boolean init(final ServiceManager serviceManager) {
@@ -58,25 +60,22 @@ public class RocksDBStatsProvider {
         return false;
       }
       statsField.setAccessible(true);
-      statistics = statsField.get(segStorage);
-      if (statistics == null) {
+      Object statsObj = statsField.get(segStorage);
+      if (statsObj == null) {
         LOG.warn("RocksDBStatsProvider: stats field is null");
         return false;
       }
+      if (!(statsObj instanceof Statistics s)) {
+        LOG.warn("RocksDBStatsProvider: stats field is {} (expected org.rocksdb.Statistics)",
+            statsObj.getClass().getName());
+        return false;
+      }
+      statistics = s;
 
-      @SuppressWarnings("unchecked")
-      Class<? extends Enum<?>> tickerTypeClass =
-          (Class<? extends Enum<?>>) Class.forName("org.rocksdb.TickerType");
-      getTickerCountMethod = statistics.getClass().getMethod("getTickerCount", tickerTypeClass);
-
-      tickerDataHit = enumValueOf(tickerTypeClass, "BLOCK_CACHE_DATA_HIT");
-      tickerDataMiss = enumValueOf(tickerTypeClass, "BLOCK_CACHE_DATA_MISS");
-      tickerMemtableHit = enumValueOf(tickerTypeClass, "MEMTABLE_HIT");
-      tickerMemtableMiss = enumValueOf(tickerTypeClass, "MEMTABLE_MISS");
-      tickerBloomUseful = enumValueOf(tickerTypeClass, "BLOOM_FILTER_USEFUL");
-
+      // Sanity check: one direct typed call through the JNI path.
+      long probe = statistics.getTickerCount(TickerType.MEMTABLE_HIT);
       available = true;
-      LOG.info("RocksDBStatsProvider initialized - real cache stats available");
+      LOG.info("RocksDBStatsProvider initialized (direct typed API) - MEMTABLE_HIT={}", probe);
       return true;
     } catch (Exception e) {
       LOG.warn("RocksDBStatsProvider init failed: {} - {}", e.getClass().getSimpleName(),
@@ -89,40 +88,32 @@ public class RocksDBStatsProvider {
     return available;
   }
 
-  /** Full snapshot of all 5 tickers (used for block-level aggregates). */
+  /** Full 5-ticker snapshot (used for block-level aggregates). */
   public Snapshot snapshot() {
     if (!available) return Snapshot.EMPTY;
-    try {
-      long dh = (long) getTickerCountMethod.invoke(statistics, tickerDataHit);
-      long dm = (long) getTickerCountMethod.invoke(statistics, tickerDataMiss);
-      long mh = (long) getTickerCountMethod.invoke(statistics, tickerMemtableHit);
-      long mm = (long) getTickerCountMethod.invoke(statistics, tickerMemtableMiss);
-      long bf = (long) getTickerCountMethod.invoke(statistics, tickerBloomUseful);
-      return new Snapshot(dh, dm, mh, mm, bf);
-    } catch (Exception e) {
-      return Snapshot.EMPTY;
-    }
+    // Direct typed invokevirtual on a cached reference -> JIT-inlinable.
+    return new Snapshot(
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_HIT),
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_MISS),
+        statistics.getTickerCount(TickerType.MEMTABLE_HIT),
+        statistics.getTickerCount(TickerType.MEMTABLE_MISS),
+        statistics.getTickerCount(TickerType.BLOOM_FILTER_USEFUL));
   }
 
   /**
-   * Lightweight snapshot of 4 tickers for per-SLOAD layer classification.
+   * 4-ticker snapshot bracketing a single SLOAD for layer classification.
    *
-   * <p>Tracks MEMTABLE_MISS in addition to the 3 hit/miss tickers because every
-   * RocksDB get() increments either MEMTABLE_HIT or MEMTABLE_MISS. Without it,
-   * bloom-filter-rejected lookups (where no data block is accessed) would be
-   * falsely classified as ACCUMULATOR.
+   * <p>This is the hot path: called twice per SLOAD (~8 JNI calls / SLOAD,
+   * ~6k / block at typical load). Kept direct-typed so JIT can inline
+   * all the way to the native {@code Statistics::getTickerCount} entry.
    */
   public MiniSnapshot miniSnapshot() {
     if (!available) return MiniSnapshot.EMPTY;
-    try {
-      long mh = (long) getTickerCountMethod.invoke(statistics, tickerMemtableHit);
-      long mm = (long) getTickerCountMethod.invoke(statistics, tickerMemtableMiss);
-      long dh = (long) getTickerCountMethod.invoke(statistics, tickerDataHit);
-      long dm = (long) getTickerCountMethod.invoke(statistics, tickerDataMiss);
-      return new MiniSnapshot(mh, mm, dh, dm);
-    } catch (Exception e) {
-      return MiniSnapshot.EMPTY;
-    }
+    return new MiniSnapshot(
+        statistics.getTickerCount(TickerType.MEMTABLE_HIT),
+        statistics.getTickerCount(TickerType.MEMTABLE_MISS),
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_HIT),
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_MISS));
   }
 
   /** Immutable snapshot of ticker counters at a point in time. */
@@ -188,10 +179,5 @@ public class RocksDBStatsProvider {
       }
     }
     return null;
-  }
-
-  @SuppressWarnings({"unchecked", "rawtypes"})
-  private static Object enumValueOf(final Class<?> enumClass, final String name) {
-    return Enum.valueOf((Class<Enum>) enumClass, name);
   }
 }
