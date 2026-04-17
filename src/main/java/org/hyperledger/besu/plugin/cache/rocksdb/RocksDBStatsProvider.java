@@ -88,13 +88,18 @@ public class RocksDBStatsProvider {
     return available;
   }
 
-  /** Full 5-ticker snapshot (used for block-level aggregates). */
+  /**
+   * Full 5-ticker snapshot (used for block-level aggregates).
+   *
+   * <p>Uses the aggregate {@code BLOCK_CACHE_HIT} / {@code BLOCK_CACHE_MISS} tickers
+   * so that index- and filter-block disk I/O is included, not only data blocks.
+   */
   public Snapshot snapshot() {
     if (!available) return Snapshot.EMPTY;
     // Direct typed invokevirtual on a cached reference -> JIT-inlinable.
     return new Snapshot(
-        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_HIT),
-        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_MISS),
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_HIT),
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_MISS),
         statistics.getTickerCount(TickerType.MEMTABLE_HIT),
         statistics.getTickerCount(TickerType.MEMTABLE_MISS),
         statistics.getTickerCount(TickerType.BLOOM_FILTER_USEFUL));
@@ -106,14 +111,20 @@ public class RocksDBStatsProvider {
    * <p>This is the hot path: called twice per SLOAD (~8 JNI calls / SLOAD,
    * ~6k / block at typical load). Kept direct-typed so JIT can inline
    * all the way to the native {@code Statistics::getTickerCount} entry.
+   *
+   * <p>Uses the aggregate {@code BLOCK_CACHE_HIT} / {@code BLOCK_CACHE_MISS}
+   * (sum of data + index + filter) rather than the data-only variants. A SLOAD
+   * whose data block is cached but whose index or filter block must be loaded
+   * from disk would otherwise be misclassified as {@code BLOCK_CACHE} while
+   * wall-clock latency reflects a disk read.
    */
   public MiniSnapshot miniSnapshot() {
     if (!available) return MiniSnapshot.EMPTY;
     return new MiniSnapshot(
         statistics.getTickerCount(TickerType.MEMTABLE_HIT),
         statistics.getTickerCount(TickerType.MEMTABLE_MISS),
-        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_HIT),
-        statistics.getTickerCount(TickerType.BLOCK_CACHE_DATA_MISS));
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_HIT),
+        statistics.getTickerCount(TickerType.BLOCK_CACHE_MISS));
   }
 
   /** Immutable snapshot of ticker counters at a point in time. */
