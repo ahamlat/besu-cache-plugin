@@ -27,6 +27,7 @@ public record BlockAnalysisResult(
     int memtable,
     int blockCache,
     int disk,
+    int notFound,
     long blockDataCacheHit,
     long blockDataCacheMiss,
     long blockMemtableHit,
@@ -42,7 +43,7 @@ public record BlockAnalysisResult(
     return new BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
         sloads, totalSloads, totalSstores, coldSloads, warmSloads, accountStats,
-        accumulator, memtable, blockCache, disk,
+        accumulator, memtable, blockCache, disk, notFound,
         blockDataCacheHit, blockDataCacheMiss, blockMemtableHit,
         rocksdbStatsAvailable, newMetadata);
   }
@@ -60,12 +61,12 @@ public record BlockAnalysisResult(
       final BlockMetadata metadata) {
 
     int cold = 0, warm = 0;
-    int totalAccum = 0, totalMem = 0, totalBCache = 0, totalDisk = 0;
+    int totalAccum = 0, totalMem = 0, totalBCache = 0, totalDisk = 0, totalNf = 0;
     Map<String, int[]> perAccount = new LinkedHashMap<>();
 
     for (SloadRecord r : sloads) {
       String addr = r.contractAddress().toHexString().toLowerCase();
-      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[6]);
+      int[] counts = perAccount.computeIfAbsent(addr, k -> new int[7]);
       if (r.isCold()) { cold++; counts[0]++; } else { warm++; counts[1]++; }
 
       switch (r.storageType()) {
@@ -75,6 +76,8 @@ public record BlockAnalysisResult(
         case "DISK"        -> { totalDisk++;  counts[5]++; }
         default            -> { totalAccum++; counts[2]++; }
       }
+
+      if (r.notFound()) { totalNf++; counts[6]++; }
     }
 
     List<AccountStats> stats = new ArrayList<>();
@@ -85,7 +88,7 @@ public record BlockAnalysisResult(
           entry.getKey(),
           name != null ? name : "",
           c[0] + c[1], c[0], c[1],
-          c[2], c[3], c[4], c[5]));
+          c[2], c[3], c[4], c[5], c[6]));
     }
     stats.sort(Comparator.comparingInt(AccountStats::totalReads).reversed());
 
@@ -93,7 +96,7 @@ public record BlockAnalysisResult(
         blockNumber, blockHash, timestamp, transactionCount,
         List.copyOf(sloads), sloads.size(), totalSstores, cold, warm,
         List.copyOf(stats),
-        totalAccum, totalMem, totalBCache, totalDisk,
+        totalAccum, totalMem, totalBCache, totalDisk, totalNf,
         blockDelta.dataCacheHit(), blockDelta.dataCacheMiss(), blockDelta.memtableHit(),
         rocksdbStatsAvailable,
         metadata);

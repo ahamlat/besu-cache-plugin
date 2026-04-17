@@ -129,6 +129,7 @@ public class WebUiServer {
       entry.put("slot", r.slotKey().toHexString());
       entry.put("cold", r.isCold());
       entry.put("storageType", r.storageType());
+      entry.put("notFound", r.notFound());
       entry.put("txIndex", r.transactionIndex());
       sloads.add(entry);
     }
@@ -175,6 +176,7 @@ public class WebUiServer {
     entry.put("memtable", r.memtable());
     entry.put("blockCache", r.blockCache());
     entry.put("disk", r.disk());
+    entry.put("notFound", r.notFound());
     entry.put("coldSloads", r.coldSloads());
     entry.put("warmSloads", r.warmSloads());
     entry.put("contracts", r.accountStats().size());
@@ -200,6 +202,7 @@ public class WebUiServer {
     response.put("memtable", r.memtable());
     response.put("blockCache", r.blockCache());
     response.put("disk", r.disk());
+    response.put("notFound", r.notFound());
     response.put("coldSloads", r.coldSloads());
     response.put("warmSloads", r.warmSloads());
     response.put("coldPercent", Math.round(r.coldPercent() * 10.0) / 10.0);
@@ -221,10 +224,12 @@ public class WebUiServer {
       acc.put("memtable", a.memtable());
       acc.put("blockCache", a.blockCache());
       acc.put("disk", a.disk());
+      acc.put("notFound", a.notFound());
       acc.put("accumulatorPercent", Math.round(a.accumulatorPercent() * 10.0) / 10.0);
       acc.put("memtablePercent", Math.round(a.memtablePercent() * 10.0) / 10.0);
       acc.put("blockCachePercent", Math.round(a.blockCachePercent() * 10.0) / 10.0);
       acc.put("diskPercent", Math.round(a.diskPercent() * 10.0) / 10.0);
+      acc.put("notFoundPercent", Math.round(a.notFoundPercent() * 10.0) / 10.0);
       acc.put("cold", a.coldReads());
       acc.put("warm", a.warmReads());
       acc.put("coldPercent", Math.round(a.coldPercent() * 10.0) / 10.0);

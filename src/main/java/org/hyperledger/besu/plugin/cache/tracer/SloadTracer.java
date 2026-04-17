@@ -148,7 +148,10 @@ public class SloadTracer implements BlockAwareOperationTracer {
         storageType = "ACCUMULATOR";
       }
 
-      sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType));
+      Bytes loadedValue = frame.getStackItem(0);
+      boolean notFound = loadedValue.isZero();
+
+      sloads.add(new SloadRecord(pendingAddress, pendingSlot, isCold, txIndex, storageType, notFound));
       nameResolver.enqueue(pendingAddress);
 
       pendingAddress = null;
@@ -200,10 +203,11 @@ public class SloadTracer implements BlockAwareOperationTracer {
     pendingTimings.put(currentBlockNumber, new long[]{blockStartNanos, blockEndNanos});
 
     LOG.info("Block {} EVM done in {}ms: {} SLOADs {} SSTOREs "
-            + "({} accum, {} memtable, {} cache, {} disk) "
+            + "({} accum, {} memtable, {} cache, {} disk, {} notfound) "
             + "gas {}/{} across {} contracts",
         currentBlockNumber, evmExecutionMs, result.totalSloads(), sstoreCount,
         result.accumulator(), result.memtable(), result.blockCache(), result.disk(),
+        result.notFound(),
         gasUsed, currentGasLimit, result.accountStats().size());
   }
 }

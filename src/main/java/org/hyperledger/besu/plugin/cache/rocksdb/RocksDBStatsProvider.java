@@ -104,14 +104,22 @@ public class RocksDBStatsProvider {
     }
   }
 
-  /** Lightweight snapshot of 3 tickers for per-SLOAD layer classification. */
+  /**
+   * Lightweight snapshot of 4 tickers for per-SLOAD layer classification.
+   *
+   * <p>Tracks MEMTABLE_MISS in addition to the 3 hit/miss tickers because every
+   * RocksDB get() increments either MEMTABLE_HIT or MEMTABLE_MISS. Without it,
+   * bloom-filter-rejected lookups (where no data block is accessed) would be
+   * falsely classified as ACCUMULATOR.
+   */
   public MiniSnapshot miniSnapshot() {
     if (!available) return MiniSnapshot.EMPTY;
     try {
       long mh = (long) getTickerCountMethod.invoke(statistics, tickerMemtableHit);
+      long mm = (long) getTickerCountMethod.invoke(statistics, tickerMemtableMiss);
       long dh = (long) getTickerCountMethod.invoke(statistics, tickerDataHit);
       long dm = (long) getTickerCountMethod.invoke(statistics, tickerDataMiss);
-      return new MiniSnapshot(mh, dh, dm);
+      return new MiniSnapshot(mh, mm, dh, dm);
     } catch (Exception e) {
       return MiniSnapshot.EMPTY;
     }
@@ -134,30 +142,41 @@ public class RocksDBStatsProvider {
   }
 
   /**
-   * Lightweight 3-ticker snapshot for bracketing individual SLOAD operations.
-   * Only captures the tickers needed to classify which RocksDB layer served the value.
+   * Lightweight 4-ticker snapshot for bracketing individual SLOAD operations.
+   *
+   * <p>Every RocksDB get() increments either MEMTABLE_HIT or MEMTABLE_MISS.
+   * When both deltas are 0, no RocksDB call was made (true accumulator hit).
+   * When MEMTABLE_MISS increases but no data block is accessed, the bloom filter
+   * rejected the key at every SST level (slot doesn't exist in DB).
    */
-  public record MiniSnapshot(long memtableHit, long blockCacheHit, long blockCacheMiss) {
-    public static final MiniSnapshot EMPTY = new MiniSnapshot(0, 0, 0);
+  public record MiniSnapshot(long memtableHit, long memtableMiss,
+                              long blockCacheHit, long blockCacheMiss) {
+    public static final MiniSnapshot EMPTY = new MiniSnapshot(0, 0, 0, 0);
 
     /**
      * Classify which storage layer served an SLOAD based on ticker deltas.
      * <ul>
-     *   <li>ACCUMULATOR: all deltas 0 -- no RocksDB activity (value from in-memory accumulator)</li>
+     *   <li>ACCUMULATOR: no memtable hit/miss delta -- no RocksDB get() called,
+     *       value served from Bonsai in-memory accumulator</li>
      *   <li>MEMTABLE: memtableHit increased -- value found in RocksDB write buffer</li>
-     *   <li>BLOCK_CACHE: blockCacheHit increased, no memtable hit -- from RocksDB block cache</li>
-     *   <li>DISK: blockCacheMiss increased, no hits -- had to read SST files from disk</li>
+     *   <li>BLOCK_CACHE: blockCacheHit increased (or memtableMiss with no data block access,
+     *       meaning bloom filter blocks in cache rejected the key) -- from RocksDB block cache</li>
+     *   <li>DISK: blockCacheMiss increased -- had to read SST data block from disk</li>
      * </ul>
      */
     public String classifyLayer(final MiniSnapshot before) {
-      long dMem = memtableHit - before.memtableHit;
-      long dHit = blockCacheHit - before.blockCacheHit;
-      long dMiss = blockCacheMiss - before.blockCacheMiss;
+      long dMemHit  = memtableHit - before.memtableHit;
+      long dMemMiss = memtableMiss - before.memtableMiss;
+      long dHit     = blockCacheHit - before.blockCacheHit;
+      long dMiss    = blockCacheMiss - before.blockCacheMiss;
 
-      if (dMem == 0 && dHit == 0 && dMiss == 0) return "ACCUMULATOR";
-      if (dMem > 0) return "MEMTABLE";
+      if (dMemHit == 0 && dMemMiss == 0) return "ACCUMULATOR";
+      if (dMemHit > 0) return "MEMTABLE";
       if (dHit > 0) return "BLOCK_CACHE";
-      return "DISK";
+      if (dMiss > 0) return "DISK";
+      // memtableMiss > 0 but no data block access: bloom filter rejected the key.
+      // Filter blocks reside in block cache, so this is effectively a cache-served lookup.
+      return "BLOCK_CACHE";
     }
   }
 

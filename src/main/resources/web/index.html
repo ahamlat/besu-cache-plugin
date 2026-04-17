@@ -8,7 +8,7 @@
   :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3;
           --muted: #8b949e; --accent: #58a6ff; --cold: #f85149; --warm: #3fb950;
           --accum: #8b949e; --mem: #d29922; --bcache: #3fb950; --disk: #f85149;
-          --hit: #3fb950; --miss: #f85149; }
+          --nf: #f0883e; --hit: #3fb950; --miss: #f85149; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
          background: var(--bg); color: var(--text); padding: 16px 20px; font-size: 13px; }
@@ -72,6 +72,7 @@
   .badge.memtable { background: rgba(210,153,34,0.15); color: var(--mem); }
   .badge.bcache { background: rgba(63,185,80,0.15); color: var(--bcache); }
   .badge.disk { background: rgba(248,81,73,0.15); color: var(--disk); }
+  .badge.nf { background: rgba(240,136,62,0.15); color: var(--nf); }
   .badge.cold { background: rgba(248,81,73,0.15); color: var(--cold); }
   .badge.warm { background: rgba(63,185,80,0.15); color: var(--warm); }
   .loading { color: var(--muted); font-style: italic; padding: 12px; }
@@ -90,6 +91,7 @@
     <option value="memtable">Sort: Memtable</option>
     <option value="blockCache">Sort: Cache</option>
     <option value="disk">Sort: Disk</option>
+    <option value="notFound">Sort: NotFound</option>
     <option value="diskPercent">Sort: Disk%</option>
     <option value="cold">Sort: Cold</option>
     <option value="contractName">Sort: Name</option>
@@ -112,7 +114,7 @@
 <table class="recent-table" id="recentTable">
   <thead>
     <tr><th>Block</th><th>Total</th><th>EVM</th><th>Root</th><th>MGas/s</th><th>Txs</th><th>Gas</th><th>SLOADs</th><th>SSTOREs</th>
-        <th>Accum</th><th>Mem</th><th>Cache</th><th>Disk</th>
+        <th>Accum</th><th>Mem</th><th>Cache</th><th>Disk</th><th>NF</th>
         <th>Cold</th><th>Warm</th><th>Contracts</th></tr>
   </thead>
   <tbody id="recentBody"></tbody>
@@ -332,6 +334,8 @@ function renderBlockInfo(d) {
       <div class="sub">${cPct}% &middot; RocksDB block cache</div></div>
     <div class="bi"><div class="lbl">Disk</div><div class="val" style="color:var(--disk)">${fmt(d.disk)}</div>
       <div class="sub">${dPct}% &middot; SST file read</div></div>
+    <div class="bi"><div class="lbl">Not Found</div><div class="val" style="color:var(--nf)">${fmt(d.notFound)}</div>
+      <div class="sub">slot empty (value=0)</div></div>
     <div class="bi"><div class="lbl">Cold (EVM)</div><div class="val" style="color:var(--cold)">${fmt(d.coldSloads)}</div></div>
     <div class="bi"><div class="lbl">Warm (EVM)</div><div class="val" style="color:var(--warm)">${fmt(d.warmSloads)}</div></div>
     <div class="bi"><div class="lbl">Contracts</div><div class="val">${d.accounts.length}</div></div>`;
@@ -357,10 +361,12 @@ function colDefs() {
     {key:'memtable', label:'Mem', type:'number', color:'var(--mem)'},
     {key:'blockCache', label:'Cache', type:'number', color:'var(--bcache)'},
     {key:'disk', label:'Disk', type:'number', color:'var(--disk)'},
+    {key:'notFound', label:'NF', type:'number', color:'var(--nf)'},
     {key:'accumulatorPercent', label:'Acc%', type:'number'},
     {key:'memtablePercent', label:'Mem%', type:'number'},
     {key:'blockCachePercent', label:'Cch%', type:'number'},
     {key:'diskPercent', label:'Dsk%', type:'number'},
+    {key:'notFoundPercent', label:'NF%', type:'number'},
     {key:'cold', label:'Cold', type:'number', color:'var(--cold)'},
     {key:'warm', label:'Warm', type:'number', color:'var(--warm)'},
     {key:'bar', label:'', type:'bar'}
@@ -442,14 +448,16 @@ async function toggleSlots(row, address) {
   const detail = document.createElement('tr');
   detail.className = 'slot-detail';
   detail.innerHTML = `<td colspan="${totalCols}"><table style="width:100%">
-    <thead><tr><th>#</th><th>Slot</th><th>Layer</th><th>EVM</th><th>Tx#</th></tr></thead><tbody>` +
+    <thead><tr><th>#</th><th>Slot</th><th>Layer</th><th>Value</th><th>EVM</th><th>Tx#</th></tr></thead><tbody>` +
     data.sloads.map((s, i) => {
       const st = s.storageType || 'ACCUMULATOR';
       const stClass = layerBadgeClass(st);
       const evmClass = s.cold ? 'cold' : 'warm';
+      const nfBadge = s.notFound ? '<span class="badge nf">NOT FOUND</span>' : '<span class="badge bcache">FOUND</span>';
       return `<tr><td style="color:var(--muted)">${i+1}</td>
         <td class="addr">${s.slot}</td>
         <td><span class="badge ${stClass}">${st}</span></td>
+        <td>${nfBadge}</td>
         <td><span class="badge ${evmClass}">${s.cold?'COLD':'WARM'}</span></td>
         <td>${s.txIndex}</td></tr>`;
     }).join('') + '</tbody></table></td>';
@@ -480,6 +488,7 @@ async function loadRecent() {
         <td style="color:var(--mem)">${b.memtable}</td>
         <td style="color:var(--bcache)">${b.blockCache}</td>
         <td style="color:var(--disk)">${b.disk}</td>
+        <td style="color:var(--nf)">${b.notFound}</td>
         <td style="color:var(--cold)">${b.coldSloads}</td>
         <td style="color:var(--warm)">${b.warmSloads}</td>
         <td>${b.contracts}</td>

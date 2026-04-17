@@ -10,7 +10,8 @@ public record AccountStats(
     int accumulator,
     int memtable,
     int blockCache,
-    int disk) {
+    int disk,
+    int notFound) {
 
   public double coldPercent() {
     return totalReads > 0 ? coldReads * 100.0 / totalReads : 0;
@@ -34,5 +35,9 @@ public record AccountStats(
 
   public double diskPercent() {
     return totalReads > 0 ? disk * 100.0 / totalReads : 0;
+  }
+
+  public double notFoundPercent() {
+    return totalReads > 0 ? notFound * 100.0 / totalReads : 0;
   }
 }

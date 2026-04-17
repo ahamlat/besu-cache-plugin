@@ -12,10 +12,12 @@ import org.apache.tuweni.units.bigints.UInt256;
  *   MEMTABLE (served from RocksDB write buffer),
  *   BLOCK_CACHE (served from RocksDB block cache),
  *   DISK (read from SST files on disk)
+ * @param notFound true when the loaded value is zero (slot empty / not in state)
  */
 public record SloadRecord(
     Address contractAddress,
     UInt256 slotKey,
     boolean isCold,
     int transactionIndex,
-    String storageType) {}
+    String storageType,
+    boolean notFound) {}
