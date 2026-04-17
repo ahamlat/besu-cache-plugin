@@ -35,6 +35,7 @@ public class ContractNameResolver {
 
   private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
   private final ConcurrentLinkedQueue<String> pendingQueue = new ConcurrentLinkedQueue<>();
+  private final ConcurrentHashMap<String, Boolean> pendingSet = new ConcurrentHashMap<>();
   private final AtomicBoolean running = new AtomicBoolean(false);
   private final AtomicInteger resolvedCount = new AtomicInteger(0);
   private final AtomicInteger failedCount = new AtomicInteger(0);
@@ -84,10 +85,9 @@ public class ContractNameResolver {
 
   public void enqueue(final Address address) {
     String addr = address.toHexString().toLowerCase();
-    if (!cache.containsKey(addr)) {
-      if (apiKey == null || apiKey.isBlank()) {
-        return;
-      }
+    if (apiKey == null || apiKey.isBlank()) return;
+    if (cache.containsKey(addr)) return;
+    if (pendingSet.putIfAbsent(addr, Boolean.TRUE) == null) {
       pendingQueue.offer(addr);
     }
   }
@@ -115,10 +115,14 @@ public class ContractNameResolver {
   private void processOne() {
     if (!running.get()) return;
     String addr = pendingQueue.poll();
-    if (addr == null || cache.containsKey(addr)) return;
+    if (addr == null || cache.containsKey(addr)) {
+      if (addr != null) pendingSet.remove(addr);
+      return;
+    }
 
     try {
       String name = lookupContractName(addr);
+      pendingSet.remove(addr);
       if (name != null && !name.isBlank()) {
         cache.put(addr, name);
         int resolved = resolvedCount.incrementAndGet();
@@ -130,12 +134,14 @@ public class ContractNameResolver {
         cache.put(addr, UNKNOWN);
       }
     } catch (Exception e) {
+      pendingSet.remove(addr);
       int failed = failedCount.incrementAndGet();
       if (failed <= 5 || failed % 20 == 0) {
         LOG.warn("Failed to resolve contract {}: {} (total failures: {})",
             addr, e.getMessage(), failed);
       }
       pendingQueue.offer(addr);
+      pendingSet.putIfAbsent(addr, Boolean.TRUE);
     }
   }
 
